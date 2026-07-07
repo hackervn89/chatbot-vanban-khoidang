@@ -1,0 +1,10 @@
+# Environment variables containing sensitive keys
+.env
+
+# Python caching
+__pycache__/
+*.pyc
+
+# Local Word document outputs and temporary files
+taovanban_khoidang/output/
+taovanban_khoidang/scripts/temp/
