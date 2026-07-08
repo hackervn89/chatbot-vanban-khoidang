@@ -8,3 +8,4 @@ __pycache__/
 # Local Word document outputs and temporary files
 taovanban_khoidang/output/
 taovanban_khoidang/scripts/temp/
+temp_git/

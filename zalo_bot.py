@@ -268,6 +268,15 @@ def main():
     print("🤖 Zalo Bot Chuyên viên số đang chạy...")
     print("==================================================")
     
+    # Xóa Webhook cũ để tránh xung đột với cơ chế getUpdates (Polling)
+    url_delete_webhook = f"https://bot-api.zaloplatforms.com/bot{ZALO_API_TOKEN}/deleteWebhook"
+    try:
+        print("[Zalo API] Đang xóa Webhook cũ...")
+        res = requests.post(url_delete_webhook, timeout=10)
+        print(f"[Zalo API] Kết quả xóa Webhook: {res.text}")
+    except Exception as e:
+        print(f"[Zalo API] Lỗi khi gỡ bỏ Webhook: {e}")
+        
     url_get_updates = f"https://bot-api.zaloplatforms.com/bot{ZALO_API_TOKEN}/getUpdates"
     
     while True:
