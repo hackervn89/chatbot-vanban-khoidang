@@ -176,6 +176,38 @@ def analyze_with_gemini(pdf_path):
             
     raise RuntimeError("Tất cả mô hình Gemini đều gặp lỗi hoặc trả về sai cấu trúc JSON.")
 
+def get_short_type(doc_type):
+    """Lấy viết tắt thể loại văn bản."""
+    dt = doc_type.lower()
+    if "kế hoạch" in dt:
+        return "KH"
+    elif "nghị quyết" in dt:
+        return "NQ"
+    elif "chương trình" in dt:
+        return "CTr"
+    elif "chỉ thị" in dt:
+        return "CT"
+    elif "quy định" in dt:
+        return "QD"
+    elif "quyết định" in dt:
+        return "QĐ"
+    return "CV"
+
+
+def get_short_title(title):
+    """Rút gọn trích yếu nội dung để đặt tên file."""
+    match = re.search(r'về\s+(.*)', title, re.IGNORECASE)
+    if match:
+        target = match.group(1).strip()
+    else:
+        target = re.sub(r'^(Thực hiện\s+|Triển khai\s+)', '', title, flags=re.IGNORECASE)
+
+    words = target.split()
+    if len(words) > 6:
+        return " ".join(words[:6])
+    return target
+
+
 def send_zalo_message(chat_id, text):
     """Gửi tin nhắn phản hồi qua Zalo"""
     url = f"https://bot-api.zaloplatforms.com/bot{ZALO_API_TOKEN}/sendMessage"
@@ -220,28 +252,53 @@ def process_zalo_message(message):
             return
             
         try:
-            # Analyze
+            # Analyze with Gemini AI
             metadata = analyze_with_gemini(pdf_path)
-            
-            # Generate docx
-            docx_filename = f"Cong_van_giao_viec_{metadata['number'].replace('/', '_')}.docx"
+
+            # Construct proper data dict for generate_document
+            doc_type = metadata["doc_type"]
+            number = metadata["number"]
+            date_str = metadata["date"]
+            authority = metadata["authority"]
+            title = metadata["title"]
+            co_quan_2 = metadata["co_quan_2"]
+
+            van_ban_cap_tren = f"{doc_type} số {number}, ngày {date_str} của {authority} về {title}"
+            trich_yeu = f"V/v thực hiện {doc_type} số {number} ngày {date_str} của {authority}"
+
+            data = {
+                "van_ban_cap_tren": van_ban_cap_tren,
+                "Ngay_den_han_1": "",
+                "Co_quan_2": co_quan_2,
+                "ngay_den_han_2": "",
+                "TRICH_YEU_CONG_VAN": trich_yeu,
+                "DANH_SACH_NOI_NHAN": ["Thường trực Đảng ủy", "Các chi bộ trực thuộc", "Lưu VPĐU"]
+            }
+
+            # Generate output filename following naming convention
+            short_type = get_short_type(doc_type)
+            short_title = get_short_title(title)
+            docx_filename = f"CV tham mưu {short_type} TU về {short_title}.docx"
+            docx_filename = re.sub(r'[\\/*?:"<>|]', "", docx_filename)
             output_docx_path = os.path.join(OUTPUT_DIR, docx_filename)
-            
-            success = generate_document(TEMPLATE_PATH, output_docx_path, metadata)
-            
-            if success and os.path.exists(output_docx_path):
+
+            # Generate document with correct parameter order: (data, template, output)
+            generate_document(data, TEMPLATE_PATH, output_docx_path)
+
+            if os.path.exists(output_docx_path):
                 # Upload to file.io
                 download_link = upload_to_file_io(output_docx_path)
                 
                 if download_link:
                     msg = (
-                        f"📊 **KẾT QUẢ PHÂN TÍCH (Mô hình {metadata['model_used']}):**\n"
-                        f"• Loại văn bản: {metadata['doc_type']}\n"
-                        f"• Số hiệu: {metadata['number']}\n"
-                        f"• Ngày ban hành: {metadata['date']}\n"
-                        f"• Cơ quan ban hành: {metadata['authority']}\n"
-                        f"• Cơ quan tham mưu: {metadata['co_quan_2']}\n\n"
-                        f"🚀 **Đã tạo văn bản Word thành công!**\n"
+                        f"📊 KẾT QUẢ PHÂN TÍCH (Mô hình {metadata.get('model_used', 'Gemini')}):\n"
+                        f"• Loại văn bản: {doc_type}\n"
+                        f"• Số hiệu: {number}\n"
+                        f"• Ngày ban hành: {date_str}\n"
+                        f"• Cơ quan ban hành: {authority}\n"
+                        f"• Cơ quan tham mưu: {co_quan_2}\n\n"
+                        f"🚀 Đã tạo văn bản Word thành công!\n"
+                        f"📁 Tên file: {docx_filename}\n"
                         f"🔗 Tải xuống tại đây (Link bảo mật chỉ dùng 1 lần): {download_link}"
                     )
                     send_zalo_message(chat_id, msg)

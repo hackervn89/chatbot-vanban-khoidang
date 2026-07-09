@@ -9,7 +9,7 @@ if sys.platform.startswith('win'):
     sys.stderr.reconfigure(encoding='utf-8')
 
 def main():
-    base_dir = r"e:\Viet Design\Chuyên viên ảo\taovanban_khoidang"
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     
     # 1. Prepare JSON input data
     data = {

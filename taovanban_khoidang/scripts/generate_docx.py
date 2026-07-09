@@ -143,12 +143,14 @@ def parse_parent_document_date(van_ban_cap_tren):
 def calculate_default_deadline(parent_date_str):
     from datetime import timedelta, datetime
     today = datetime.now()
-    deadline = today + timedelta(days=10)
-    # 0 = Monday, 5 = Saturday, 6 = Sunday
-    if deadline.weekday() == 5:
-        deadline += timedelta(days=2)
-    elif deadline.weekday() == 6:
+    # Tính 10 ngày làm việc (bỏ qua Thứ 7 và Chủ nhật)
+    working_days_added = 0
+    deadline = today
+    while working_days_added < 10:
         deadline += timedelta(days=1)
+        # 0 = Monday ... 4 = Friday (ngày làm việc)
+        if deadline.weekday() < 5:
+            working_days_added += 1
     return deadline.strftime("%d/%m/%Y")
 
 def apply_bold_italic_to_deadline(paragraph, date_str):
@@ -373,7 +375,7 @@ def generate_document(data, template_path, output_path):
                             
                     else:
                         if "{{DANH_SACH_NOI_NHAN}}" in text:
-                            paragraphs_to_delete.append(p)
+                            delete_paragraph(p)
                             continue
 
                             

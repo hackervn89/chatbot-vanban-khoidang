@@ -2,3 +2,4 @@ pyTelegramBotAPI
 pypdf
 python-docx
 google-genai
+requests
