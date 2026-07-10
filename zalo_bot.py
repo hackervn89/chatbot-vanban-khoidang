@@ -43,11 +43,13 @@ from generate_docx import generate_document
 # Configs
 ZALO_API_TOKEN = os.environ.get('ZALO_API_TOKEN')
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
+DEEPSEEK_API_KEY = os.environ.get('DEEPSEEK_API_KEY')
 
 GEMINI_MODELS = [
-    "gemini-3.5-flash",
-    "gemini-3-flash-preview",
+    "gemini-1.5-flash",
     "gemini-2.5-flash",
+    "gemini-1.5-pro",
+    "gemini-3.5-flash",
 ]
 
 TEMPLATE_PATH = os.path.join(PROJECT_ROOT, "references", "cong_van_giao_viec_mau.docx")
@@ -149,6 +151,49 @@ def upload_to_file_io(file_path):
         print(f"[!] Lỗi khi tải file lên file.io: {e}")
     return None
 
+def analyze_with_deepseek(text):
+    """Phân tích văn bản sử dụng Deepseek Chat API (Có phí, ưu tiên hàng đầu)"""
+    if not DEEPSEEK_API_KEY:
+        print("[Deepseek] DEEPSEEK_API_KEY chưa cấu hình. Bỏ qua...")
+        return None
+        
+    url = "https://api.deepseek.com/chat/completions"
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {DEEPSEEK_API_KEY}"
+    }
+    
+    payload = {
+        "model": "deepseek-chat",
+        "messages": [
+            {"role": "system", "content": GEMINI_SYSTEM_PROMPT},
+            {"role": "user", "content": text}
+        ],
+        "response_format": {
+            "type": "json_object"
+        },
+        "temperature": 0.1
+    }
+    
+    try:
+        print("[Deepseek] Đang gửi yêu cầu phân tích...")
+        response = requests.post(url, json=payload, headers=headers, timeout=30)
+        if response.status_code == 200:
+            res_data = response.json()
+            content = res_data["choices"][0]["message"]["content"].strip()
+            data = json.loads(content)
+            
+            required_fields = ["doc_type", "number", "date", "authority", "title", "co_quan_2"]
+            if all(field in data for field in required_fields):
+                data["model_used"] = "DeepSeek-V3"
+                print("[+] Phân tích thành công bởi: DeepSeek-V3")
+                return data
+        else:
+            print(f"[-] Deepseek API Error: {response.status_code} - {response.text}")
+    except Exception as e:
+        print(f"[-] Lỗi khi gọi Deepseek API: {e}")
+    return None
+
 def analyze_with_gemini(pdf_path):
     """Hàm trích xuất dữ liệu bằng Gemini API (Đọc PDF)"""
     if not GEMINI_API_KEY:
@@ -229,6 +274,87 @@ def analyze_image_with_gemini(image_path):
             
     raise RuntimeError("Tất cả mô hình Gemini đều gặp lỗi hoặc trả về sai cấu trúc JSON.")
 
+def normalize_agency_name(name):
+    if not name:
+        return ""
+    val = name.strip().lower().replace("  ", " ")
+    val = val.replace("uỷ", "ủy").replace("oà", "òa").replace("uý", "úy")
+    return val
+
+def determine_agency_2(title, first_page_text):
+    text = (title + " " + first_page_text).lower()
+    text = text.replace("uỷ", "ủy").replace("oà", "òa").replace("uý", "úy")
+
+    # Giám sát
+    has_giamsat = "giám sát" in text
+    is_mttq_giamsat = has_giamsat and any(k in text for k in ["phản biện xã hội", "cộng đồng", "của nhân dân"])
+    
+    # Phòng chống tham nhũng
+    has_pctn = any(k in text for k in ["phòng chống tham nhũng", "tiêu cực", "lãng phí"])
+    is_ubkt_pctn = has_pctn and any(k in text for k in ["kiểm tra", "kỷ luật", "đảng viên", "vi phạm"])
+    
+    # Tuyên truyền
+    has_tuyentruyen = "tuyên truyền" in text
+    is_mttq_tuyentruyen = has_tuyentruyen and any(k in text for k in ["vận động quần chúng", "vận động nhân dân"])
+    
+    if is_ubkt_giamsat := has_giamsat and not is_mttq_giamsat or is_ubkt_pctn or any(k in text for k in ["kiểm tra", "kỷ luật", "vi phạm", "suy thoái"]):
+        return "Uỷ ban kiểm tra Đảng uỷ xã"
+    if has_pctn and not is_ubkt_pctn or any(k in text for k in ["văn thư", "lưu trữ", "quy chế làm việc", "chương trình công tác"]):
+        return "Văn phòng Đảng uỷ xã"
+    if has_tuyentruyen and not is_mttq_tuyentruyen or any(k in text for k in ["tổ chức cán bộ", "quy hoạch", "nhân sự", "tuyên giáo", "dân vận"]):
+        return "Ban Xây dựng Đảng"
+    if is_mttq_giamsat or is_mttq_tuyentruyen or any(k in text for k in ["mặt trận tổ quốc", "mttq", "đoàn thanh niên", "hội phụ nữ", "cựu chiến binh"]):
+        return "Uỷ ban Mặt trận Tổ quốc Việt Nam xã"
+        
+    return "Uỷ ban nhân dân xã"
+
+def parse_pdf_metadata(pdf_path):
+    reader = PdfReader(pdf_path)
+    first_page_text = reader.pages[0].extract_text() or ""
+    lines = [line.strip() for line in first_page_text.split('\n') if line.strip()]
+    
+    number = ""
+    num_match = re.search(r'Số\s+([^\r\n]+)', first_page_text, re.IGNORECASE)
+    if num_match:
+        number = num_match.group(1).strip()
+        
+    date_str = ""
+    date_match = re.search(r'ngày\s+(\d+)\s+tháng\s+(\d+)\s+năm\s+(\d+)', first_page_text, re.IGNORECASE)
+    if date_match:
+        d, m, y = date_match.groups()
+        date_str = f"{int(d):02d}/{int(m):02d}/{y}"
+        
+    doc_type = "Kế hoạch"
+    title = ""
+    types = ["KẾ HOẠCH", "NGHỊ QUYẾT", "CHƯƠNG TRÌNH", "CHỈ THỊ", "QUY ĐỊNH", "QUYẾT ĐỊNH"]
+    type_idx = -1
+    for idx, line in enumerate(lines):
+        if any(t in line.upper() for t in types):
+            doc_type = line.title()
+            type_idx = idx
+            break
+            
+    if type_idx != -1:
+        title_lines = []
+        for idx in range(type_idx + 1, len(lines)):
+            line = lines[idx]
+            if line.startswith("---") or line.startswith("I.") or "mục đích" in line.lower():
+                break
+            title_lines.append(line)
+        title = " ".join(title_lines).strip()
+        
+    title = re.sub(r'\s*\-+\s*$', '', title)
+    
+    authority = "Ban Thường vụ Tỉnh ủy"
+    if "ban thường vụ tỉnh ủy" in first_page_text.lower():
+        authority = "Ban Thường vụ Tỉnh ủy"
+    elif "thường trực tỉnh ủy" in first_page_text.lower():
+        authority = "Thường trực Tỉnh ủy"
+    elif "tỉnh ủy" in first_page_text.lower():
+        authority = "Tỉnh ủy"
+        
+    return doc_type, number, date_str, authority, title
+
 def get_short_type(doc_type):
     """Lấy viết tắt thể loại văn bản."""
     dt = doc_type.lower()
@@ -274,7 +400,7 @@ def send_zalo_message(chat_id, text):
         return {}
 
 def generate_and_send_word_doc(chat_id, metadata, sender_name):
-    """Sinh văn bản Word từ dữ liệu đã phân tích và gửi trả link tải file.io"""
+    """Sinh văn bản Word từ dữ liệu đã phân tích và gửi trả link tải trực tiếp"""
     doc_type = metadata["doc_type"]
     number = metadata["number"]
     date_str = metadata["date"]
@@ -322,7 +448,7 @@ def generate_and_send_word_doc(chat_id, metadata, sender_name):
             
         if download_link:
             msg = (
-                f"📊 KẾT QUẢ PHÂN TÍCH (Mô hình {metadata.get('model_used', 'Gemini')}):\n"
+                f"📊 KẾT QUẢ PHÂN TÍCH (Nguồn: {metadata.get('model_used', 'Hệ thống')}, Soạn thảo thành công):\n"
                 f"• Loại văn bản: {doc_type}\n"
                 f"• Số hiệu: {number}\n"
                 f"• Ngày ban hành: {date_str}\n"
@@ -334,34 +460,31 @@ def generate_and_send_word_doc(chat_id, metadata, sender_name):
             )
             send_zalo_message(chat_id, msg)
         else:
-            send_zalo_message(chat_id, "❌ Soạn văn bản thành công nhưng không thể upload hoặc tạo liên kết tải về. Vui lòng liên hệ quản trị viên.")
+            send_zalo_message(chat_id, "❌ Soạn văn bản thành công nhưng không thể tạo liên kết tải về.")
     else:
         send_zalo_message(chat_id, "❌ Lỗi trong quá trình tạo tệp văn bản từ biểu mẫu Word.")
 
 def process_zalo_message(message):
     """Xử lý tin nhắn nhận được (chữ hoặc ảnh)"""
-    # In log tin nhắn nhận được để phân tích cấu trúc dữ liệu thực tế
     print(f"[Zalo Bot Log] Nhận tin nhắn raw: {json.dumps(message, ensure_ascii=False)}")
 
     chat_id = message.get("chat", {}).get("id")
     text = message.get("text", "").strip()
     sender_name = message.get("from", {}).get("display_name", "bạn")
     
-    # Trích xuất đường dẫn ảnh (photo_url) theo nhiều cấu trúc phòng hờ
+    # Trích xuất photo_url
     photo_url = message.get("photo_url", "").strip()
     raw_photo = message.get("photo") if not photo_url else None
     
-    if isinstance(raw_photo, str):
+    if raw_photo and isinstance(raw_photo, str):
         photo_url = raw_photo.strip()
-    elif isinstance(raw_photo, dict):
+    elif raw_photo and isinstance(raw_photo, dict):
         photo_url = raw_photo.get("url", "").strip() or raw_photo.get("photo", "").strip()
-    elif isinstance(raw_photo, list) and len(raw_photo) > 0:
-        # Nếu dạng danh sách (giống Telegram)
+    elif raw_photo and isinstance(raw_photo, list) and len(raw_photo) > 0:
         last_photo = raw_photo[-1]
         if isinstance(last_photo, dict):
             photo_url = last_photo.get("url", "").strip() or last_photo.get("photo", "").strip()
             
-    # Hỗ trợ cấu trúc Zalo OA attachments
     attachments = message.get("attachments", [])
     if not photo_url and isinstance(attachments, list) and len(attachments) > 0:
         payload = attachments[0].get("payload", {})
@@ -417,14 +540,47 @@ def process_zalo_message(message):
             return
             
         try:
-            # Phân tích PDF bằng Gemini
-            metadata = analyze_with_gemini(pdf_path)
+            metadata = None
+            first_page_text = ""
             
-            # Xử lý tạo tài liệu Word và gửi link tải
-            generate_and_send_word_doc(chat_id, metadata, sender_name)
+            # 1. Thử DeepSeek trả phí trước (ưu tiên số 1)
+            try:
+                reader = PdfReader(pdf_path)
+                first_page_text = reader.pages[0].extract_text() or ""
+                metadata = analyze_with_deepseek(first_page_text)
+            except Exception as e:
+                print(f"[Fallback Log] Lỗi khi gọi Deepseek: {e}")
+                
+            # 2. Thử Gemini làm dự phòng số 2
+            if not metadata:
+                try:
+                    metadata = analyze_with_gemini(pdf_path)
+                except Exception as e:
+                    print(f"[Fallback Log] Lỗi khi gọi Gemini: {e}")
+                    
+            # 3. Thử bộ quy tắc nội bộ làm dự phòng số 3
+            if not metadata:
+                print("[Fallback Log] Tất cả AI lỗi. Chuyển sang sử dụng quy tắc cục bộ...")
+                doc_type, number, date_str, authority, title = parse_pdf_metadata(pdf_path)
+                if number and date_str:
+                    co_quan_2 = determine_agency_2(title, first_page_text)
+                    metadata = {
+                        "doc_type": doc_type,
+                        "number": number,
+                        "date": date_str,
+                        "authority": authority,
+                        "title": title,
+                        "co_quan_2": co_quan_2,
+                        "model_used": "Quy tắc nội bộ"
+                    }
             
+            if metadata:
+                generate_and_send_word_doc(chat_id, metadata, sender_name)
+            else:
+                send_zalo_message(chat_id, "❌ Không thể phân tích văn bản này bằng AI hoặc quy tắc nội bộ. Hãy kiểm tra lại file PDF.")
+                
         except Exception as e:
-            send_zalo_message(chat_id, f"❌ Đã xảy ra lỗi khi phân tích bằng AI: {str(e)}")
+            send_zalo_message(chat_id, f"❌ Đã xảy ra lỗi khi phân tích: {str(e)}")
         finally:
             if os.path.exists(pdf_path):
                 os.remove(pdf_path)
@@ -440,7 +596,7 @@ def main():
         
     print("==================================================")
     print("🤖 Zalo Bot Chuyên viên số đang chạy...")
-    print("📌 Phiên bản: 1.0.4 (Hỗ trợ phân tích ảnh trực tiếp)")
+    print("📌 Phiên bản: 1.0.8 (Hỗ trợ phân tích ảnh trực tiếp)")
     print("==================================================")
     
     # Xóa Webhook cũ để tránh xung đột với cơ chế getUpdates (Polling)

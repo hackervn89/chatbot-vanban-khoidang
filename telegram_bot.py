@@ -2,6 +2,7 @@ import os
 import re
 import sys
 import json
+import requests
 import telebot
 from pypdf import PdfReader
 from google import genai
@@ -43,12 +44,14 @@ from generate_docx import generate_document
 # ==================== CONFIGURATION ====================
 API_TOKEN = os.environ.get('TELEGRAM_API_TOKEN')
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
+DEEPSEEK_API_KEY = os.environ.get('DEEPSEEK_API_KEY')
 
 # Danh sách mô hình Gemini theo thứ tự ưu tiên (fallback chain)
 GEMINI_MODELS = [
-    "gemini-3.5-flash",
-    "gemini-3-flash-preview",
+    "gemini-1.5-flash",
     "gemini-2.5-flash",
+    "gemini-1.5-pro",
+    "gemini-3.5-flash",
 ]
 # =======================================================
 
@@ -154,6 +157,51 @@ def analyze_with_gemini(pdf_text):
             continue
 
     print("[!] Tất cả mô hình Gemini đều thất bại. Chuyển sang Rule-based.")
+    return None
+
+def analyze_with_deepseek(text):
+    """
+    Gửi văn bản cho Deepseek Chat API (Có phí, ưu tiên hàng đầu).
+    """
+    if not DEEPSEEK_API_KEY or DEEPSEEK_API_KEY == 'ĐIỀN_DEEPSEEK_API_KEY_TẠI_ĐÂY':
+        print("[Deepseek] DEEPSEEK_API_KEY chưa cấu hình. Bỏ qua...")
+        return None
+        
+    url = "https://api.deepseek.com/chat/completions"
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {DEEPSEEK_API_KEY}"
+    }
+    
+    payload = {
+        "model": "deepseek-chat",
+        "messages": [
+            {"role": "system", "content": GEMINI_SYSTEM_PROMPT},
+            {"role": "user", "content": text}
+        ],
+        "response_format": {
+            "type": "json_object"
+        },
+        "temperature": 0.1
+    }
+    
+    try:
+        print("[Deepseek] Đang gửi yêu cầu phân tích...")
+        response = requests.post(url, json=payload, headers=headers, timeout=30)
+        if response.status_code == 200:
+            res_data = response.json()
+            content = res_data["choices"][0]["message"]["content"].strip()
+            data = json.loads(content)
+            
+            required_fields = ["doc_type", "number", "date", "authority", "title", "co_quan_2"]
+            if all(field in data and data[field] for field in required_fields):
+                data["model_used"] = "DeepSeek-V3"
+                print("[+] Phân tích thành công bởi: DeepSeek-V3")
+                return data
+        else:
+            print(f"[-] Deepseek API Error: {response.status_code} - {response.text}")
+    except Exception as e:
+        print(f"[-] Lỗi khi gọi Deepseek API: {e}")
     return None
 
 def parse_pdf_metadata(pdf_path):
@@ -435,7 +483,13 @@ def handle_docs(message):
 
         # 4. Try AI analysis first, then fallback to Rule-based
         analysis_method = ""
-        ai_result = analyze_with_gemini(combined_text)
+        
+        # 4.1 Thử phân tích bằng DeepSeek trước (có phí)
+        ai_result = analyze_with_deepseek(combined_text)
+        
+        # 4.2 Nếu DeepSeek không cấu hình hoặc lỗi, thử Gemini (miễn phí)
+        if not ai_result:
+            ai_result = analyze_with_gemini(combined_text)
         
         if ai_result:
             # === AI SUCCESS ===
