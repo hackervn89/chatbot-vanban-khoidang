@@ -296,7 +296,7 @@ def search_duckduckgo_free(query, max_results=3):
     return []
 
 def ask_dhtn_qa(chat_id, question):
-    """Trả lời thắc mắc của người dùng dựa trên bộ tri thức ĐHTN kết hợp RAG HDSD và giữ ngữ cảnh hội thoại"""
+    """Trả lời thắc mắc của người dùng dựa trên bộ tri thức ĐHTN kết hợp RAG HDSD và giữ ngữ cảnh hội thoại, chỉ dùng DeepSeek làm mô hình chính"""
     if not KIENTHUC_CONTENT and not CHUNKS_DATA:
         return None, None
         
@@ -309,163 +309,99 @@ def ask_dhtn_qa(chat_id, question):
         if relevant_results:
             best_score = relevant_results[0][0]
             
-    # TRƯỜNG HỢP 1: Điểm số khớp cao (Hỏi về nghiệp vụ nội bộ ĐHTN/TTHC/Đảng) -> Dùng CSDL cục bộ và ưu tiên DeepSeek
+    # Lấy thông tin ngữ cảnh (Nội bộ hoặc Tìm kiếm Web)
+    relevant_context = ""
     if best_score >= 35:
-        print(f"[RAG] Điểm số nội bộ cao ({best_score:.1f}). Ưu tiên sử dụng DeepSeek cho nghiệp vụ hành chính Đảng.")
+        print(f"[RAG] Điểm số nội bộ cao ({best_score:.1f}). Sử dụng tài liệu nghiệp vụ nội bộ.")
         relevant_context = "\n\nDưới đây là tài liệu hướng dẫn chi tiết trích từ HDSD hệ thống:\n"
         for idx, (score, chunk) in enumerate(relevant_results):
             relevant_context += f"--- Nguồn tài liệu: {chunk['source']} ---\n{chunk['text']}\n"
-            
-        system_prompt = DHTN_QA_SYSTEM_PROMPT.format(
-            kienthuc_content=KIENTHUC_CONTENT + relevant_context
-        )
-        
-        # 1. Thử DeepSeek trả phí trước cho nghiệp vụ Đảng
-        if DEEPSEEK_API_KEY:
-            url = "https://api.deepseek.com/chat/completions"
-            headers = {
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {DEEPSEEK_API_KEY}"
-            }
-            messages = [{"role": "system", "content": system_prompt}]
-            messages.extend(history)
-            messages.append({"role": "user", "content": question})
-            payload = {
-                "model": "deepseek-chat",
-                "messages": messages,
-                "temperature": 0.3  # Nghiệp vụ cần nhiệt độ thấp để chính xác
-            }
-            try:
-                print(f"[Zalo QA] Đang gửi câu hỏi nghiệp vụ tới DeepSeek...")
-                response = requests.post(url, json=payload, headers=headers, timeout=25)
-                if response.status_code == 200:
-                    res_data = response.json()
-                    reply = res_data["choices"][0]["message"]["content"].strip()
-                    if reply:
-                        add_chat_message(chat_id, "user", question)
-                        add_chat_message(chat_id, "assistant", reply)
-                        return reply, "DeepSeek-V3"
-            except Exception as e:
-                print(f"[Zalo QA] Lỗi gọi DeepSeek Q&A nghiệp vụ: {e}")
-                
-        # 2. Thử Gemini làm dự phòng cho nghiệp vụ Đảng
-        if GEMINI_API_KEY:
-            client = genai.Client(api_key=GEMINI_API_KEY)
-            gemini_contents = []
-            for msg in history:
-                role = "user" if msg["role"] == "user" else "model"
-                gemini_contents.append(
-                    types.Content(
-                        role=role,
-                        parts=[types.Part.from_text(text=msg["content"])]
-                    )
-                )
-            gemini_contents.append(
-                types.Content(
-                    role="user",
-                    parts=[types.Part.from_text(text=question)]
-                )
-            )
-            for model_name in GEMINI_MODELS:
-                try:
-                    print(f"[Zalo QA] Đang gửi câu hỏi nghiệp vụ tới Gemini dự phòng ({model_name})...")
-                    response = client.models.generate_content(
-                        model=model_name,
-                        contents=gemini_contents,
-                        config=types.GenerateContentConfig(
-                            system_instruction=system_prompt,
-                            temperature=0.3,
-                        ),
-                    )
-                    reply = response.text.strip()
-                    if reply:
-                        add_chat_message(chat_id, "user", question)
-                        add_chat_message(chat_id, "assistant", reply)
-                        return reply, model_name
-                except Exception as e:
-                    print(f"[Zalo QA] Lỗi gọi Gemini nghiệp vụ: {e}")
-
-    # TRƯỜNG HỢP 2: Điểm số khớp thấp (Câu hỏi chung/tìm kiếm thông tin) -> Dùng Google Search Grounding của Gemini
     else:
-        print(f"[RAG] Điểm số nội bộ thấp ({best_score:.1f}). Định tuyến câu hỏi chung sang Gemini + Google Search Grounding...")
-        if GEMINI_API_KEY:
-            client = genai.Client(api_key=GEMINI_API_KEY)
-            gemini_contents = []
-            for msg in history:
-                role = "user" if msg["role"] == "user" else "model"
-                gemini_contents.append(
-                    types.Content(
-                        role=role,
-                        parts=[types.Part.from_text(text=msg["content"])]
-                    )
-                )
-            gemini_contents.append(
-                types.Content(
-                    role="user",
-                    parts=[types.Part.from_text(text=question)]
-                )
-            )
-            system_prompt = DHTN_QA_SYSTEM_PROMPT.format(kienthuc_content="")
-            google_search_tool = types.Tool(
-                google_search=types.GoogleSearch()
-            )
-            for model_name in GEMINI_MODELS:
-                try:
-                    print(f"[Zalo QA] Đang gửi câu hỏi tìm kiếm tới Gemini ({model_name})...")
-                    response = client.models.generate_content(
-                        model=model_name,
-                        contents=gemini_contents,
-                        config=types.GenerateContentConfig(
-                            system_instruction=system_prompt,
-                            temperature=0.5,
-                            tools=[google_search_tool]
-                        ),
-                    )
-                    reply = response.text.strip()
-                    if reply:
-                        add_chat_message(chat_id, "user", question)
-                        add_chat_message(chat_id, "assistant", reply)
-                        return reply, model_name
-                except Exception as e:
-                    print(f"[Zalo QA] Lỗi gọi Gemini Google Search Grounding: {e}")
-
-        # 3. Fallback cuối cùng nếu không có Gemini hoặc Gemini lỗi -> Dùng DeepSeek + DuckDuckGo Search
-        print("[RAG] Không thể dùng Gemini. Đang lùi về phương án dự phòng DeepSeek + DuckDuckGo...")
+        print(f"[RAG] Điểm số nội bộ thấp ({best_score:.1f}). Đang tìm kiếm Web...")
         web_results = search_duckduckgo_free(question)
-        relevant_context = ""
         if web_results:
             relevant_context = "\n\nDưới đây là thông tin tìm kiếm thời gian thực trên Internet về câu hỏi này:\n"
             for idx, snippet in enumerate(web_results):
                 relevant_context += f"- Kết quả {idx+1}: {snippet}\n"
                 
-        system_prompt = DHTN_QA_SYSTEM_PROMPT.format(
-            kienthuc_content=KIENTHUC_CONTENT + relevant_context
+    system_prompt = DHTN_QA_SYSTEM_PROMPT.format(
+        kienthuc_content=KIENTHUC_CONTENT + relevant_context
+    )
+    
+    # 1. Ưu tiên số 1: Luôn dùng DeepSeek cho mọi câu hỏi
+    if DEEPSEEK_API_KEY:
+        url = "https://api.deepseek.com/chat/completions"
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {DEEPSEEK_API_KEY}"
+        }
+        messages = [{"role": "system", "content": system_prompt}]
+        messages.extend(history)
+        messages.append({"role": "user", "content": question})
+        payload = {
+            "model": "deepseek-chat",
+            "messages": messages,
+            "temperature": 0.5
+        }
+        try:
+            print(f"[QA] Đang gửi câu hỏi tới DeepSeek (Lịch sử: {len(history)} tin)...")
+            response = requests.post(url, json=payload, headers=headers, timeout=25)
+            if response.status_code == 200:
+                res_data = response.json()
+                reply = res_data["choices"][0]["message"]["content"].strip()
+                if reply:
+                    add_chat_message(chat_id, "user", question)
+                    add_chat_message(chat_id, "assistant", reply)
+                    return reply, "DeepSeek-V3"
+        except Exception as e:
+            print(f"[QA] Lỗi gọi DeepSeek Q&A: {e}")
+            
+    # 2. Phương án dự phòng cuối cùng nếu DeepSeek lỗi hoặc hết tiền -> Dùng Gemini
+    if GEMINI_API_KEY:
+        client = genai.Client(api_key=GEMINI_API_KEY)
+        gemini_contents = []
+        for msg in history:
+            role = "user" if msg["role"] == "user" else "model"
+            gemini_contents.append(
+                types.Content(
+                    role=role,
+                    parts=[types.Part.from_text(text=msg["content"])]
+                )
+            )
+        gemini_contents.append(
+            types.Content(
+                role="user",
+                parts=[types.Part.from_text(text=question)]
+            )
         )
-        if DEEPSEEK_API_KEY:
-            url = "https://api.deepseek.com/chat/completions"
-            headers = {
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {DEEPSEEK_API_KEY}"
-            }
-            messages = [{"role": "system", "content": system_prompt}]
-            messages.extend(history)
-            messages.append({"role": "user", "content": question})
-            payload = {
-                "model": "deepseek-chat",
-                "messages": messages,
-                "temperature": 0.5
-            }
+        
+        # Bật thêm Google Search Grounding cho Gemini dự phòng nếu câu hỏi là chung
+        tools_config = []
+        if best_score < 35:
+            google_search_tool = types.Tool(
+                google_search=types.GoogleSearch()
+            )
+            tools_config = [google_search_tool]
+            
+        for model_name in GEMINI_MODELS:
             try:
-                response = requests.post(url, json=payload, headers=headers, timeout=25)
-                if response.status_code == 200:
-                    res_data = response.json()
-                    reply = res_data["choices"][0]["message"]["content"].strip()
-                    if reply:
-                        add_chat_message(chat_id, "user", question)
-                        add_chat_message(chat_id, "assistant", reply)
-                        return reply, "DeepSeek-V3"
+                print(f"[QA] Đang gọi Gemini dự phòng ({model_name})...")
+                response = client.models.generate_content(
+                    model=model_name,
+                    contents=gemini_contents,
+                    config=types.GenerateContentConfig(
+                        system_instruction=system_prompt,
+                        temperature=0.5,
+                        tools=tools_config if tools_config else None
+                    ),
+                )
+                reply = response.text.strip()
+                if reply:
+                    add_chat_message(chat_id, "user", question)
+                    add_chat_message(chat_id, "assistant", reply)
+                    return reply, model_name
             except Exception as e:
-                print(f"[Zalo QA] Lỗi gọi DeepSeek Q&A dự phòng cuối: {e}")
+                print(f"[QA] Lỗi gọi Gemini dự phòng: {e}")
                 
     return None, None
 
