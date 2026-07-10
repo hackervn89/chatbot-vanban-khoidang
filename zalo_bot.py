@@ -348,8 +348,8 @@ def process_zalo_message(message):
     sender_name = message.get("from", {}).get("display_name", "bạn")
     
     # Trích xuất đường dẫn ảnh (photo_url) theo nhiều cấu trúc phòng hờ
-    photo_url = ""
-    raw_photo = message.get("photo")
+    photo_url = message.get("photo_url", "").strip()
+    raw_photo = message.get("photo") if not photo_url else None
     
     if isinstance(raw_photo, str):
         photo_url = raw_photo.strip()
@@ -466,7 +466,7 @@ def main():
                     event_name = update.get("event_name")
                     message = update.get("message", {})
                     
-                    if event_name in ["message.text.received", "message.image.received"] or "text" in message or "photo" in message:
+                    if event_name in ["message.text.received", "message.image.received"] or "text" in message or "photo" in message or "photo_url" in message:
                         process_zalo_message(message)
             time.sleep(1)
         except KeyboardInterrupt:
