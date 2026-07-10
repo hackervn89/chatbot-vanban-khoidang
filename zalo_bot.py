@@ -117,7 +117,7 @@ def retrieve_chunks(question, chunks, idfs, top_n=3):
         if score > 0:
             scored_chunks.append((score, chunk))
     scored_chunks.sort(key=lambda x: x[0], reverse=True)
-    return [c[1] for c in scored_chunks[:top_n]]
+    return scored_chunks[:top_n]
 
 def load_knowledge_bases():
     global KIENTHUC_CONTENT, CHUNKS_DATA, CHUNKS_IDFS
@@ -283,6 +283,27 @@ def add_chat_message(chat_id, role, content):
     if len(CONVERSATION_HISTORY[chat_id]) > MAX_HISTORY_LEN:
         CONVERSATION_HISTORY[chat_id] = CONVERSATION_HISTORY[chat_id][-MAX_HISTORY_LEN:]
 
+def search_duckduckgo_free(query, max_results=3):
+    """Tìm kiếm DuckDuckGo không cần API Token để lấy thông tin thời gian thực"""
+    import urllib.parse
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36'
+    }
+    url = f"https://html.duckduckgo.com/html/?q={urllib.parse.quote(query)}"
+    try:
+        r = requests.get(url, headers=headers, timeout=10)
+        if r.status_code == 200:
+            snippets = re.findall(r'<a class="result__snippet"[^>]*>(.*?)</a>', r.text, re.DOTALL)
+            results = []
+            for s in snippets[:max_results]:
+                clean_s = re.sub(r'<[^>]+>', '', s).strip()
+                clean_s = clean_s.replace('&amp;', '&').replace('&quot;', '"').replace('&#x27;', "'").replace('&lt;', '<').replace('&gt;', '>')
+                results.append(clean_s)
+            return results
+    except Exception as e:
+        print(f"[Search Error] {e}")
+    return []
+
 def ask_dhtn_qa(chat_id, question):
     """Trả lời thắc mắc của người dùng dựa trên bộ tri thức ĐHTN kết hợp RAG HDSD và giữ ngữ cảnh hội thoại"""
     if not KIENTHUC_CONTENT and not CHUNKS_DATA:
@@ -290,12 +311,25 @@ def ask_dhtn_qa(chat_id, question):
         
     # Tìm kiếm tài liệu HDSD liên quan qua RAG dựa trên câu hỏi hiện tại
     relevant_context = ""
+    best_score = 0
     if CHUNKS_DATA:
-        relevant_chunks = retrieve_chunks(question, CHUNKS_DATA, CHUNKS_IDFS, top_n=3)
-        if relevant_chunks:
-            relevant_context = "\n\nDưới đây là tài liệu hướng dẫn chi tiết trích từ HDSD hệ thống ĐHTN:\n"
-            for idx, chunk in enumerate(relevant_chunks):
+        relevant_results = retrieve_chunks(question, CHUNKS_DATA, CHUNKS_IDFS, top_n=3)
+        if relevant_results:
+            best_score = relevant_results[0][0]
+            
+        # Nếu điểm số khớp cao (hỏi về ĐHTN/TTHC/Đảng) -> Dùng dữ liệu cục bộ
+        if best_score >= 35:
+            relevant_context = "\n\nDưới đây là tài liệu hướng dẫn chi tiết trích từ HDSD hệ thống:\n"
+            for idx, (score, chunk) in enumerate(relevant_results):
                 relevant_context += f"--- Nguồn tài liệu: {chunk['source']} ---\n{chunk['text']}\n"
+        else:
+            # Ngược lại -> Tìm kiếm Web thời gian thực
+            print(f"[RAG] Điểm số nội bộ thấp ({best_score:.1f}). Đang tìm kiếm Web...")
+            web_results = search_duckduckgo_free(question)
+            if web_results:
+                relevant_context = "\n\nDưới đây là thông tin tìm kiếm thời gian thực trên Internet về câu hỏi này:\n"
+                for idx, snippet in enumerate(web_results):
+                    relevant_context += f"- Kết quả {idx+1}: {snippet}\n"
                 
     system_prompt = DHTN_QA_SYSTEM_PROMPT.format(
         kienthuc_content=KIENTHUC_CONTENT + relevant_context
