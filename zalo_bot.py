@@ -584,6 +584,18 @@ def send_zalo_message(chat_id, text):
         print(f"[Zalo API] Gửi tin nhắn lỗi: {e}")
         return {}
 
+def send_zalo_chat_action(chat_id, action="typing"):
+    """Gửi trạng thái (như đang soạn tin nhắn) qua Zalo"""
+    url = f"https://bot-api.zaloplatforms.com/bot{ZALO_API_TOKEN}/sendChatAction"
+    payload = {
+        "chat_id": chat_id,
+        "action": action
+    }
+    try:
+        requests.post(url, json=payload, timeout=5)
+    except Exception as e:
+        print(f"[Zalo API] Gửi chat action lỗi: {e}")
+
 def generate_and_send_word_doc(chat_id, metadata, sender_name):
     """Sinh văn bản Word từ dữ liệu đã phân tích và gửi trả link tải trực tiếp"""
     doc_type = metadata["doc_type"]
@@ -680,7 +692,7 @@ def process_zalo_message(message):
         
     # 1. Xử lý hình ảnh (Ảnh chụp trang đầu văn bản chỉ đạo) -> Quy trình soạn thảo công văn
     if photo_url:
-        send_zalo_message(chat_id, "⏳ Đã nhận hình ảnh văn bản. Đang tiến hành tải ảnh và phân tích chữ...")
+        send_zalo_chat_action(chat_id, "typing")
         
         img_filename = f"zalo_ocr_{int(time.time())}.jpg"
         img_path = os.path.join(TEMP_DIR, img_filename)
@@ -705,7 +717,7 @@ def process_zalo_message(message):
 
     # 2. Tất cả tin nhắn văn bản còn lại -> Chuyển sang Hỏi đáp nghiệp vụ (Q&A)
     if text:
-        send_zalo_message(chat_id, "⏳ Đang tra cứu thông tin để giải đáp thắc mắc của bạn...")
+        send_zalo_chat_action(chat_id, "typing")
         reply_text, model_used = ask_dhtn_qa(text)
         
         if reply_text:
