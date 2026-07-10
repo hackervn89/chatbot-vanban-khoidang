@@ -323,6 +323,7 @@ def main():
         
     print("==================================================")
     print("🤖 Zalo Bot Chuyên viên số đang chạy...")
+    print("📌 Phiên bản: 1.0.3 (Đã sửa lỗi tham số generate_document)")
     print("==================================================")
     
     # Xóa Webhook cũ để tránh xung đột với cơ chế getUpdates (Polling)

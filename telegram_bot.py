@@ -521,7 +521,8 @@ if __name__ == "__main__":
         sys.exit(1)
         
     print("==================================================")
-    print("🤖 Chuyên Viên số  đang khởi động...")
+    print("🤖 Chuyên Viên số đang khởi động...")
+    print("📌 Phiên bản: 1.0.3")
     print("Lắng nghe yêu cầu soạn thảo từ xa...")
     print("==================================================")
     
