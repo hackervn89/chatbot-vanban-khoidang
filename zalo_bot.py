@@ -67,6 +67,8 @@ CHUNKS_DATA = []
 CHUNKS_IDFS = {}
 
 def remove_accents(input_str):
+    import unicodedata
+    input_str = unicodedata.normalize('NFC', input_str)
     s1 = u'ÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚÝàáâãèéêìíòóôõùúýĂăĐđĨĩŨũƠơƯưẠạẢảẤấẦầẨẩẪẫẬậẮắẰằẲẳẴẵẬậẸẹẺẻẼẽẾếỀềỂểỄễỆệỊịỌọỎỏỐốỒồỔổỖỗỘộỚớỜờỞởỠỡỢợỤụỦủỨứỪừỬửỮữỰựỲỳỶỷỸỹỴỵ'
     s0 = u'AAAAEEEIIOOOOUUYaaaaeeeiioooouuyAaDdIiUuOoUuAaAaAaAaAaAaAaAaAaAaAaAaEeEeEeEeEeEeEeEeIiOoOoOoOoOoOoOoOoOoOoOoOoUuUuUuUuUuUuUuYyYyYyYy'
     s = ""
@@ -86,7 +88,7 @@ def calculate_idfs(chunks):
         path_words = chunk["source_unsigned"].replace("/", " ").replace("_", " ").replace(".", " ").split()
         unique_words.update(path_words)
         for word in unique_words:
-            if len(word) > 2:
+            if len(word) > 1:
                 doc_counts[word] = doc_counts.get(word, 0) + 1
     idfs = {}
     for word, count in doc_counts.items():
@@ -95,7 +97,7 @@ def calculate_idfs(chunks):
 
 def retrieve_chunks(question, chunks, idfs, top_n=3):
     question_clean = remove_accents(question.lower())
-    words = [w for w in question_clean.split() if len(w) > 2]
+    words = [w for w in question_clean.split() if len(w) > 1]
     if not words:
         return []
     scored_chunks = []
