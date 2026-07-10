@@ -102,6 +102,92 @@ Bạn PHẢI trả lời bằng JSON hợp lệ với đúng cấu trúc sau (kh
 }"""
 
 
+KIENTHUC_PATH = os.path.join(PROJECT_ROOT, "references", "kienthuc_dhtn.md")
+KIENTHUC_CONTENT = ""
+
+def load_kienthuc():
+    """Tải bộ tri thức ĐHTN khi khởi chạy bot"""
+    global KIENTHUC_CONTENT
+    if os.path.exists(KIENTHUC_PATH):
+        try:
+            with open(KIENTHUC_PATH, 'r', encoding='utf-8') as f:
+                KIENTHUC_CONTENT = f.read().strip()
+            print(f"[Telegram Bot] Đã tải bộ kiến thức hệ thống ĐHTN ({len(KIENTHUC_CONTENT)} ký tự).")
+        except Exception as e:
+            print(f"[Telegram Bot] Lỗi khi đọc file kiến thức: {e}")
+    else:
+        print(f"[Telegram Bot] Cảnh báo: Không tìm thấy tệp kiến thức tại: {KIENTHUC_PATH}")
+
+load_kienthuc()
+
+DHTN_QA_SYSTEM_PROMPT = """Bạn là trợ lý ảo hỗ trợ người dùng hệ thống Điều hành tác nghiệp (ĐHTN - dhtn.dcs.vn).
+Nhiệm vụ của bạn là dựa vào Bộ Kiến Thức Hệ Thống ĐHTN được cung cấp dưới đây để trả lời các câu hỏi của người dùng một cách chính xác, ngắn gọn, lịch sự và dễ hiểu.
+
+Quy tắc trả lời câu hỏi:
+1. Bạn phải căn cứ hoàn toàn vào thông tin trong Bộ Kiến Thức. Không bịa đặt hoặc tự suy diễn thông tin nằm ngoài tài liệu.
+2. Nếu câu hỏi không liên quan đến hệ thống ĐHTN hoặc không có thông tin trong Bộ Kiến Thức, hãy trả lời lịch sự rằng: "Xin lỗi, câu hỏi này nằm ngoài phạm vi hỗ trợ của tôi về hệ thống Điều hành tác nghiệp. Bạn có cần hỗ trợ gì về thao tác trên hệ thống ĐHTN không?" hoặc hướng dẫn họ cách gửi ảnh/link để soạn thảo công văn.
+3. Hành văn bằng tiếng Việt chuẩn công vụ, lịch sự, rõ ràng. Có thể sử dụng các bullet points (danh sách) hoặc bảng biểu ngắn gọn để câu trả lời dễ đọc.
+
+Dưới đây là Bộ Kiến Thức Hệ Thống ĐHTN để bạn tham chiếu:
+=== BẮT ĐẦU BỘ KIẾN THỨC ===
+{kienthuc_content}
+=== KẾT THÚC BỘ KIẾN THỨC ==="""
+
+def ask_dhtn_qa(question):
+    """Trả lời thắc mắc của người dùng dựa trên bộ tri thức ĐHTN"""
+    if not KIENTHUC_CONTENT:
+        return None, None
+        
+    system_prompt = DHTN_QA_SYSTEM_PROMPT.format(kienthuc_content=KIENTHUC_CONTENT)
+    
+    # 1. Thử DeepSeek trả phí trước
+    if DEEPSEEK_API_KEY:
+        url = "https://api.deepseek.com/chat/completions"
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {DEEPSEEK_API_KEY}"
+        }
+        payload = {
+            "model": "deepseek-chat",
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": question}
+            ],
+            "temperature": 0.5
+        }
+        try:
+            print("[Telegram QA] Đang gửi câu hỏi tới DeepSeek...")
+            response = requests.post(url, json=payload, headers=headers, timeout=25)
+            if response.status_code == 200:
+                res_data = response.json()
+                reply = res_data["choices"][0]["message"]["content"].strip()
+                if reply:
+                    return reply, "DeepSeek-V3"
+        except Exception as e:
+            print(f"[Telegram QA] Lỗi gọi DeepSeek Q&A: {e}")
+            
+    # 2. Thử Gemini làm dự phòng
+    if GEMINI_API_KEY:
+        client = genai.Client(api_key=GEMINI_API_KEY)
+        for model_name in GEMINI_MODELS:
+            try:
+                print(f"[Telegram QA] Đang gửi câu hỏi tới Gemini ({model_name})...")
+                response = client.models.generate_content(
+                    model=model_name,
+                    contents=question,
+                    config=types.GenerateContentConfig(
+                        system_instruction=system_prompt,
+                        temperature=0.5,
+                    ),
+                )
+                reply = response.text.strip()
+                if reply:
+                    return reply, model_name
+            except Exception as e:
+                print(f"[Telegram QA] Lỗi gọi Gemini Q&A ({model_name}): {e}")
+                
+    return None, None
+
 def analyze_with_gemini(pdf_text):
     """
     Gửi văn bản PDF cho Gemini API để phân tích.
@@ -568,6 +654,32 @@ def handle_docs(message):
             except Exception:
                 pass
 
+@bot.message_handler(content_types=['text'])
+def handle_text_questions(message):
+    question = message.text.strip()
+    if question.startswith('/'):
+        return  # Bỏ qua các lệnh hệ thống
+        
+    bot.send_chat_action(message.chat.id, 'typing')
+    
+    reply_text, model_used = ask_dhtn_qa(question)
+    if reply_text:
+        footnote = f"\n\n*🤖 Trả lời bởi {model_used} dựa trên Bộ kiến thức ĐHTN.*"
+        try:
+            bot.reply_to(message, reply_text + footnote, parse_mode='Markdown')
+        except Exception:
+            try:
+                bot.reply_to(message, reply_text + f"\n\n[Trả lời bởi {model_used} dựa trên Bộ kiến thức ĐHTN]")
+            except Exception as e:
+                print(f"[Telegram QA Error] Không thể gửi tin phản hồi: {e}")
+    else:
+        # Nếu cả AI đều lỗi/không trả lời được
+        fallback = (
+            "Tôi không hiểu yêu cầu này và hiện không thể trả lời thắc mắc của bạn.\n\n"
+            "👉 Vui lòng gửi file PDF văn bản chỉ đạo để tôi soạn thảo công văn.\n"
+            "👉 Hoặc hỏi rõ ràng về cách sử dụng hệ thống Điều hành tác nghiệp nhé."
+        )
+        bot.reply_to(message, fallback)
 
 if __name__ == "__main__":
     if API_TOKEN == 'YOUR_TELEGRAM_BOT_TOKEN':

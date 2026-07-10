@@ -55,11 +55,30 @@ GEMINI_MODELS = [
 TEMPLATE_PATH = os.path.join(PROJECT_ROOT, "references", "cong_van_giao_viec_mau.docx")
 OUTPUT_DIR = os.path.join(PROJECT_ROOT, "output")
 TEMP_DIR = os.path.join(PROJECT_ROOT, "scripts", "temp")
+MAP_FILE = os.path.join(TEMP_DIR, "file_map.json")
+KIENTHUC_PATH = os.path.join(PROJECT_ROOT, "references", "kienthuc_dhtn.md")
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 os.makedirs(TEMP_DIR, exist_ok=True)
 
-# Shared Prompt
+KIENTHUC_CONTENT = ""
+
+def load_kienthuc():
+    """Tải bộ tri thức ĐHTN khi khởi chạy bot"""
+    global KIENTHUC_CONTENT
+    if os.path.exists(KIENTHUC_PATH):
+        try:
+            with open(KIENTHUC_PATH, 'r', encoding='utf-8') as f:
+                KIENTHUC_CONTENT = f.read().strip()
+            print(f"[Zalo Bot] Đã tải bộ kiến thức hệ thống ĐHTN ({len(KIENTHUC_CONTENT)} ký tự).")
+        except Exception as e:
+            print(f"[Zalo Bot] Lỗi khi đọc file kiến thức: {e}")
+    else:
+        print(f"[Zalo Bot] Cảnh báo: Không tìm thấy tệp kiến thức tại: {KIENTHUC_PATH}")
+
+load_kienthuc()
+
+# Shared Prompts
 GEMINI_SYSTEM_PROMPT = """Bạn là chuyên viên văn thư hành chính Đảng. Nhiệm vụ của bạn là đọc văn bản chỉ đạo của cấp trên và trích xuất chính xác các thông tin sau.
 
 Quy tắc xác định Cơ quan ban hành:
@@ -89,6 +108,19 @@ Bạn PHẢI trả lời bằng JSON hợp lệ với đúng cấu trúc sau (kh
   "title": "Trích yếu nội dung (phần sau chữ 'về')",
   "co_quan_2": "Tên cơ quan tham mưu triển khai (1 trong 5 cơ quan ở trên)"
 }"""
+
+DHTN_QA_SYSTEM_PROMPT = """Bạn là trợ lý ảo hỗ trợ người dùng hệ thống Điều hành tác nghiệp (ĐHTN - dhtn.dcs.vn).
+Nhiệm vụ của bạn là dựa vào Bộ Kiến Thức Hệ Thống ĐHTN được cung cấp dưới đây để trả lời các câu hỏi của người dùng một cách chính xác, ngắn gọn, lịch sự và dễ hiểu.
+
+Quy tắc trả lời câu hỏi:
+1. Bạn phải căn cứ hoàn toàn vào thông tin trong Bộ Kiến Thức. Không bịa đặt hoặc tự suy diễn thông tin nằm ngoài tài liệu.
+2. Nếu câu hỏi không liên quan đến hệ thống ĐHTN hoặc không có thông tin trong Bộ Kiến Thức, hãy trả lời lịch sự rằng: "Xin lỗi, câu hỏi này nằm ngoài phạm vi hỗ trợ của tôi về hệ thống Điều hành tác nghiệp. Bạn có cần hỗ trợ gì về thao tác trên hệ thống ĐHTN không?" hoặc hướng dẫn họ cách gửi ảnh/link để soạn thảo công văn.
+3. Hành văn bằng tiếng Việt chuẩn công vụ, lịch sự, rõ ràng. Có thể sử dụng các bullet points (danh sách) hoặc bảng biểu ngắn gọn để câu trả lời dễ đọc.
+
+Dưới đây là Bộ Kiến Thức Hệ Thống ĐHTN để bạn tham chiếu:
+=== BẮT ĐẦU BỘ KIẾN THỨC ===
+{kienthuc_content}
+=== KẾT THÚC BỘ KIẾN THỨC ==="""
 
 def download_gdrive_file(url, output_path):
     """Tải file PDF công khai từ Google Drive"""
@@ -150,6 +182,75 @@ def upload_to_file_io(file_path):
     except Exception as e:
         print(f"[!] Lỗi khi tải file lên file.io: {e}")
     return None
+
+def save_file_mapping(file_id, filename):
+    """Lưu mapping giữa mã file ngắn và tên tệp tin thực tế"""
+    try:
+        data = {}
+        if os.path.exists(MAP_FILE):
+            with open(MAP_FILE, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+        data[file_id] = filename
+        with open(MAP_FILE, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        print(f"[Zalo Bot] Đã lưu mapping file: {file_id} -> {filename}")
+    except Exception as e:
+        print(f"[Zalo Bot] Lỗi khi ghi file_map: {e}")
+
+def ask_dhtn_qa(question):
+    """Trả lời thắc mắc của người dùng dựa trên bộ tri thức ĐHTN"""
+    if not KIENTHUC_CONTENT:
+        return None, None
+        
+    system_prompt = DHTN_QA_SYSTEM_PROMPT.format(kienthuc_content=KIENTHUC_CONTENT)
+    
+    # 1. Thử DeepSeek trả phí trước
+    if DEEPSEEK_API_KEY:
+        url = "https://api.deepseek.com/chat/completions"
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {DEEPSEEK_API_KEY}"
+        }
+        payload = {
+            "model": "deepseek-chat",
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": question}
+            ],
+            "temperature": 0.5
+        }
+        try:
+            print("[Zalo QA] Đang gửi câu hỏi tới DeepSeek...")
+            response = requests.post(url, json=payload, headers=headers, timeout=25)
+            if response.status_code == 200:
+                res_data = response.json()
+                reply = res_data["choices"][0]["message"]["content"].strip()
+                if reply:
+                    return reply, "DeepSeek-V3"
+        except Exception as e:
+            print(f"[Zalo QA] Lỗi gọi DeepSeek Q&A: {e}")
+            
+    # 2. Thử Gemini làm dự phòng
+    if GEMINI_API_KEY:
+        client = genai.Client(api_key=GEMINI_API_KEY)
+        for model_name in GEMINI_MODELS:
+            try:
+                print(f"[Zalo QA] Đang gửi câu hỏi tới Gemini ({model_name})...")
+                response = client.models.generate_content(
+                    model=model_name,
+                    contents=question,
+                    config=types.GenerateContentConfig(
+                        system_instruction=system_prompt,
+                        temperature=0.5,
+                    ),
+                )
+                reply = response.text.strip()
+                if reply:
+                    return reply, model_name
+            except Exception as e:
+                print(f"[Zalo QA] Lỗi gọi Gemini Q&A ({model_name}): {e}")
+                
+    return None, None
 
 def analyze_with_deepseek(text):
     """Phân tích văn bản sử dụng Deepseek Chat API (Có phí, ưu tiên hàng đầu)"""
@@ -431,15 +532,14 @@ def generate_and_send_word_doc(chat_id, metadata, sender_name):
     generate_document(data, TEMPLATE_PATH, output_docx_path)
 
     if os.path.exists(output_docx_path):
-        # Construct direct download link if SERVER_DOMAIN is configured, otherwise fallback to file.io
+        # Tạo file ID ngắn gọn bằng phần dư epoch time
+        file_id = f"f{int(time.time() * 1000) % 10000000}"
+        save_file_mapping(file_id, docx_filename)
+        
         server_domain = os.environ.get('SERVER_DOMAIN', '').strip().rstrip('/')
         
-        # URL-encode the filename to make sure spaces/special characters in filename work in URLs
-        import urllib.parse
-        encoded_filename = urllib.parse.quote(docx_filename)
-        
         if server_domain:
-            download_link = f"{server_domain}/download/{encoded_filename}"
+            download_link = f"{server_domain}/download/{file_id}"
             link_desc = "tải trực tiếp từ server"
         else:
             print("[Zalo Bot] SERVER_DOMAIN chưa cấu hình. Dùng fallback file.io...")
@@ -523,7 +623,8 @@ def process_zalo_message(message):
     if text.lower() in ["xin chào", "chào bot", "hello", "hi", "bắt đầu"]:
         reply = (f"Chào {sender_name}! Tôi là Bot Chuyên viên số của Đảng uỷ xã.\n\n"
                  "👉 **Cách 1 (Nhanh nhất):** Chụp ảnh rõ nét trang đầu của văn bản chỉ đạo và gửi trực tiếp vào đây.\n"
-                 "👉 **Cách 2:** Tải file PDF chỉ đạo lên Google Drive, chia sẻ chế độ công khai và gửi link vào đây.")
+                 "👉 **Cách 2:** Tải file PDF chỉ đạo lên Google Drive, chia sẻ chế độ công khai và gửi link vào đây.\n"
+                 "👉 **Cách 3:** Nhập trực tiếp thắc mắc/câu hỏi của bạn về hệ thống Điều hành tác nghiệp (ĐHTN) để tôi giải đáp.")
         send_zalo_message(chat_id, reply)
         return
 
@@ -585,9 +686,21 @@ def process_zalo_message(message):
             if os.path.exists(pdf_path):
                 os.remove(pdf_path)
     else:
-        # Nhắc nhở cú pháp
-        reply = "Tôi không hiểu yêu cầu này. Hãy gửi một ảnh chụp trang đầu văn bản chỉ đạo hoặc đường link Google Drive chứa file PDF nhé."
-        send_zalo_message(chat_id, reply)
+        # 4. Nhánh xử lý Q&A về hệ thống Điều hành tác nghiệp (ĐHTN)
+        send_zalo_message(chat_id, "⏳ Đang tra cứu bộ kiến thức ĐHTN để giải đáp thắc mắc của bạn...")
+        reply_text, model_used = ask_dhtn_qa(text)
+        
+        if reply_text:
+            footnote = f"\n\n🤖 Trả lời bởi {model_used} dựa trên Bộ kiến thức ĐHTN."
+            send_zalo_message(chat_id, reply_text + footnote)
+        else:
+            # Nhắc nhở cú pháp mặc định
+            reply = (
+                "Tôi không hiểu yêu cầu này và hiện không thể trả lời thắc mắc của bạn.\n\n"
+                "👉 Hãy gửi một ảnh chụp trang đầu văn bản chỉ đạo hoặc đường link Google Drive chứa file PDF.\n"
+                "👉 Hoặc hỏi rõ ràng về cách sử dụng hệ thống Điều hành tác nghiệp nhé."
+            )
+            send_zalo_message(chat_id, reply)
 
 def main():
     if not ZALO_API_TOKEN:
@@ -596,7 +709,7 @@ def main():
         
     print("==================================================")
     print("🤖 Zalo Bot Chuyên viên số đang chạy...")
-    print("📌 Phiên bản: 1.0.8 (Hỗ trợ phân tích ảnh trực tiếp)")
+    print("📌 Phiên bản: 1.1.0 (Rút gọn link + Q&A ĐHTN)")
     print("==================================================")
     
     # Xóa Webhook cũ để tránh xung đột với cơ chế getUpdates (Polling)
