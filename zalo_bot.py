@@ -340,11 +340,34 @@ def generate_and_send_word_doc(chat_id, metadata, sender_name):
 
 def process_zalo_message(message):
     """Xử lý tin nhắn nhận được (chữ hoặc ảnh)"""
+    # In log tin nhắn nhận được để phân tích cấu trúc dữ liệu thực tế
+    print(f"[Zalo Bot Log] Nhận tin nhắn raw: {json.dumps(message, ensure_ascii=False)}")
+
     chat_id = message.get("chat", {}).get("id")
     text = message.get("text", "").strip()
-    photo_url = message.get("photo", "").strip()
     sender_name = message.get("from", {}).get("display_name", "bạn")
     
+    # Trích xuất đường dẫn ảnh (photo_url) theo nhiều cấu trúc phòng hờ
+    photo_url = ""
+    raw_photo = message.get("photo")
+    
+    if isinstance(raw_photo, str):
+        photo_url = raw_photo.strip()
+    elif isinstance(raw_photo, dict):
+        photo_url = raw_photo.get("url", "").strip() or raw_photo.get("photo", "").strip()
+    elif isinstance(raw_photo, list) and len(raw_photo) > 0:
+        # Nếu dạng danh sách (giống Telegram)
+        last_photo = raw_photo[-1]
+        if isinstance(last_photo, dict):
+            photo_url = last_photo.get("url", "").strip() or last_photo.get("photo", "").strip()
+            
+    # Hỗ trợ cấu trúc Zalo OA attachments
+    attachments = message.get("attachments", [])
+    if not photo_url and isinstance(attachments, list) and len(attachments) > 0:
+        payload = attachments[0].get("payload", {})
+        if isinstance(payload, dict):
+            photo_url = payload.get("url", "").strip() or payload.get("thumbnailUrl", "").strip()
+            
     if not chat_id:
         return
         
