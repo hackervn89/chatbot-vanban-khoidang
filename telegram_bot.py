@@ -317,12 +317,16 @@ def ask_dhtn_qa(chat_id, question):
         for model_name in GEMINI_MODELS:
             try:
                 print(f"[Telegram QA] Đang gửi câu hỏi tới Gemini ({model_name}, Lịch sử: {len(history)} tin)...")
+                google_search_tool = types.Tool(
+                    google_search=types.GoogleSearch()
+                )
                 response = client.models.generate_content(
                     model=model_name,
                     contents=gemini_contents,
                     config=types.GenerateContentConfig(
                         system_instruction=system_prompt,
                         temperature=0.5,
+                        tools=[google_search_tool]
                     ),
                 )
                 reply = response.text.strip()
