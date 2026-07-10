@@ -548,7 +548,7 @@ def generate_and_send_word_doc(chat_id, metadata, sender_name):
             
         if download_link:
             msg = (
-                f"📊 KẾT QUẢ PHÂN TÍCH (Nguồn: {metadata.get('model_used', 'Hệ thống')}, Soạn thảo thành công):\n"
+                f"📊 KẾT QUẢ PHÂN TÍCH (Dựa trên kiến thức được đào tạo):\n"
                 f"• Loại văn bản: {doc_type}\n"
                 f"• Số hiệu: {number}\n"
                 f"• Ngày ban hành: {date_str}\n"
@@ -594,9 +594,9 @@ def process_zalo_message(message):
     if not chat_id:
         return
         
-    # 1. Xử lý hình ảnh (Ảnh chụp trang đầu văn bản chỉ đạo)
+    # 1. Xử lý hình ảnh (Ảnh chụp trang đầu văn bản chỉ đạo) -> Quy trình soạn thảo công văn
     if photo_url:
-        send_zalo_message(chat_id, "⏳ Đã nhận hình ảnh văn bản. Đang tiến hành tải ảnh và phân tích chữ bằng AI...")
+        send_zalo_message(chat_id, "⏳ Đã nhận hình ảnh văn bản. Đang tiến hành tải ảnh và phân tích chữ...")
         
         img_filename = f"zalo_ocr_{int(time.time())}.jpg"
         img_path = os.path.join(TEMP_DIR, img_filename)
@@ -613,92 +613,25 @@ def process_zalo_message(message):
             generate_and_send_word_doc(chat_id, metadata, sender_name)
             
         except Exception as e:
-            send_zalo_message(chat_id, f"❌ Đã xảy ra lỗi khi phân tích ảnh bằng AI: {str(e)}")
+            send_zalo_message(chat_id, f"❌ Đã xảy ra lỗi khi phân tích ảnh: {str(e)}")
         finally:
             if os.path.exists(img_path):
                 os.remove(img_path)
         return
 
-    # 2. Xử lý câu chào hỏi
-    if text.lower() in ["xin chào", "chào bot", "hello", "hi", "bắt đầu"]:
-        reply = (f"Chào {sender_name}! Tôi là Bot Chuyên viên số của Đảng uỷ xã.\n\n"
-                 "👉 **Cách 1 (Nhanh nhất):** Chụp ảnh rõ nét trang đầu của văn bản chỉ đạo và gửi trực tiếp vào đây.\n"
-                 "👉 **Cách 2:** Tải file PDF chỉ đạo lên Google Drive, chia sẻ chế độ công khai và gửi link vào đây.\n"
-                 "👉 **Cách 3:** Nhập trực tiếp thắc mắc/câu hỏi của bạn về hệ thống Điều hành tác nghiệp (ĐHTN) để tôi giải đáp.")
-        send_zalo_message(chat_id, reply)
-        return
-
-    # 3. Xử lý Google Drive Link
-    if "drive.google.com" in text:
-        send_zalo_message(chat_id, "⏳ Đã nhận liên kết Google Drive. Đang tiến hành tải tệp và phân tích dữ liệu...")
-        
-        pdf_filename = f"zalo_{int(time.time())}.pdf"
-        pdf_path = os.path.join(TEMP_DIR, pdf_filename)
-        
-        # Download
-        if not download_gdrive_file(text, pdf_path):
-            send_zalo_message(chat_id, "❌ Không thể tải file từ liên kết của bạn. Hãy đảm bảo bạn đã bật chia sẻ 'Bất kỳ ai có liên kết' (Public) cho file PDF đó trên Google Drive.")
-            return
-            
-        try:
-            metadata = None
-            first_page_text = ""
-            
-            # 1. Thử DeepSeek trả phí trước (ưu tiên số 1)
-            try:
-                reader = PdfReader(pdf_path)
-                first_page_text = reader.pages[0].extract_text() or ""
-                metadata = analyze_with_deepseek(first_page_text)
-            except Exception as e:
-                print(f"[Fallback Log] Lỗi khi gọi Deepseek: {e}")
-                
-            # 2. Thử Gemini làm dự phòng số 2
-            if not metadata:
-                try:
-                    metadata = analyze_with_gemini(pdf_path)
-                except Exception as e:
-                    print(f"[Fallback Log] Lỗi khi gọi Gemini: {e}")
-                    
-            # 3. Thử bộ quy tắc nội bộ làm dự phòng số 3
-            if not metadata:
-                print("[Fallback Log] Tất cả AI lỗi. Chuyển sang sử dụng quy tắc cục bộ...")
-                doc_type, number, date_str, authority, title = parse_pdf_metadata(pdf_path)
-                if number and date_str:
-                    co_quan_2 = determine_agency_2(title, first_page_text)
-                    metadata = {
-                        "doc_type": doc_type,
-                        "number": number,
-                        "date": date_str,
-                        "authority": authority,
-                        "title": title,
-                        "co_quan_2": co_quan_2,
-                        "model_used": "Quy tắc nội bộ"
-                    }
-            
-            if metadata:
-                generate_and_send_word_doc(chat_id, metadata, sender_name)
-            else:
-                send_zalo_message(chat_id, "❌ Không thể phân tích văn bản này bằng AI hoặc quy tắc nội bộ. Hãy kiểm tra lại file PDF.")
-                
-        except Exception as e:
-            send_zalo_message(chat_id, f"❌ Đã xảy ra lỗi khi phân tích: {str(e)}")
-        finally:
-            if os.path.exists(pdf_path):
-                os.remove(pdf_path)
-    else:
-        # 4. Nhánh xử lý Q&A về hệ thống Điều hành tác nghiệp (ĐHTN)
-        send_zalo_message(chat_id, "⏳ Đang tra cứu bộ kiến thức ĐHTN để giải đáp thắc mắc của bạn...")
+    # 2. Tất cả tin nhắn văn bản còn lại -> Chuyển sang Hỏi đáp nghiệp vụ (Q&A)
+    if text:
+        send_zalo_message(chat_id, "⏳ Đang tra cứu thông tin để giải đáp thắc mắc của bạn...")
         reply_text, model_used = ask_dhtn_qa(text)
         
         if reply_text:
-            footnote = f"\n\n🤖 Trả lời bởi {model_used} dựa trên Bộ kiến thức ĐHTN."
+            footnote = f"\n\n(Dựa trên kiến thức được đào tạo)"
             send_zalo_message(chat_id, reply_text + footnote)
         else:
-            # Nhắc nhở cú pháp mặc định
+            # Nhắc nhở nếu lỗi hệ thống
             reply = (
-                "Tôi không hiểu yêu cầu này và hiện không thể trả lời thắc mắc của bạn.\n\n"
-                "👉 Hãy gửi một ảnh chụp trang đầu văn bản chỉ đạo hoặc đường link Google Drive chứa file PDF.\n"
-                "👉 Hoặc hỏi rõ ràng về cách sử dụng hệ thống Điều hành tác nghiệp nhé."
+                "Hiện tại tôi chưa thể trả lời câu hỏi này. Bạn vui lòng thử lại sau.\n\n"
+                "👉 Để soạn thảo công văn giao việc, bạn hãy gửi ảnh chụp trang đầu văn bản chỉ đạo vào đây."
             )
             send_zalo_message(chat_id, reply)
 

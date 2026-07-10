@@ -627,7 +627,7 @@ def handle_docs(message):
             f"- Ngày ban hành: {date_str}\n"
             f"- Cơ quan ban hành: {authority}\n"
             f"- Cơ quan tham mưu: {co_quan_2}\n"
-            f"- Phân tích bởi: {analysis_method}\n\n"
+            f"- Phân tích: Dựa trên kiến thức được đào tạo\n\n"
             f"⚡ Đang chạy sinh công văn...",
             parse_mode='Markdown'
         )
@@ -640,7 +640,7 @@ def handle_docs(message):
             bot.send_document(
                 message.chat.id, 
                 doc_file, 
-                caption=f"✅ Đã soạn thảo xong công văn!\n📁 Tên file: {output_name}\n{analysis_method}"
+                caption=f"✅ Đã soạn thảo xong công văn!\n📁 Tên file: {output_name}\n(Dựa trên kiến thức được đào tạo)"
             )
             
     except Exception as e:
@@ -664,12 +664,12 @@ def handle_text_questions(message):
     
     reply_text, model_used = ask_dhtn_qa(question)
     if reply_text:
-        footnote = f"\n\n*🤖 Trả lời bởi {model_used} dựa trên Bộ kiến thức ĐHTN.*"
+        footnote = f"\n\n*Dựa trên kiến thức được đào tạo.*"
         try:
             bot.reply_to(message, reply_text + footnote, parse_mode='Markdown')
         except Exception:
             try:
-                bot.reply_to(message, reply_text + f"\n\n[Trả lời bởi {model_used} dựa trên Bộ kiến thức ĐHTN]")
+                bot.reply_to(message, reply_text + f"\n\n[Dựa trên kiến thức được đào tạo]")
             except Exception as e:
                 print(f"[Telegram QA Error] Không thể gửi tin phản hồi: {e}")
     else:
