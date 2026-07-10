@@ -487,8 +487,13 @@ def get_short_title(title):
     return target
 
 def send_zalo_message(chat_id, text):
-    """Gửi tin nhắn phản hồi qua Zalo"""
+    """Gửi tin nhắn phản hồi qua Zalo (Tự động làm sạch định dạng Markdown)"""
     url = f"https://bot-api.zaloplatforms.com/bot{ZALO_API_TOKEN}/sendMessage"
+    
+    # Làm sạch ký tự Markdown do Zalo chỉ hỗ trợ text thuần
+    if text:
+        text = text.replace("**", "").replace("*", "").replace("`", "")
+        
     payload = {
         "chat_id": chat_id,
         "text": text
