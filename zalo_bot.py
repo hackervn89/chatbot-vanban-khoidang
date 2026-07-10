@@ -761,7 +761,7 @@ def process_zalo_message(message):
         reply_text, model_used = ask_dhtn_qa(chat_id, text)
         
         if reply_text:
-            footnote = f"\n\n(Dựa trên kiến thức được đào tạo)"
+            footnote = f"\n\n(Bạn cần kiểm tra lại thông tin trước khi sử dụng)"
             send_zalo_message(chat_id, reply_text + footnote)
         else:
             # Nhắc nhở nếu lỗi hệ thống
