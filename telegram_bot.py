@@ -817,16 +817,37 @@ def handle_text_questions(message):
         
     bot.send_chat_action(message.chat.id, 'typing')
     
+    def split_message(text, max_len=4000):
+        if len(text) <= max_len:
+            return [text]
+        parts = []
+        while text:
+            if len(text) <= max_len:
+                parts.append(text)
+                break
+            split_idx = text.rfind('\n', 0, max_len)
+            if split_idx == -1:
+                split_idx = text.rfind(' ', 0, max_len)
+            if split_idx == -1:
+                split_idx = max_len
+            parts.append(text[:split_idx].strip())
+            text = text[split_idx:].strip()
+        return parts
+
     reply_text, model_used = ask_dhtn_qa(message.chat.id, question)
     if reply_text:
         footnote = f"\n\n*Dựa trên kiến thức được đào tạo.*"
-        try:
-            bot.reply_to(message, reply_text + footnote, parse_mode='Markdown')
-        except Exception:
+        full_msg = reply_text + footnote
+        parts = split_message(full_msg, max_len=4000)
+        for part in parts:
             try:
-                bot.reply_to(message, reply_text + f"\n\n[Dựa trên kiến thức được đào tạo]")
-            except Exception as e:
-                print(f"[Telegram QA Error] Không thể gửi tin phản hồi: {e}")
+                bot.reply_to(message, part, parse_mode='Markdown')
+            except Exception:
+                try:
+                    bot.reply_to(message, part)
+                except Exception as e:
+                    print(f"[Telegram QA Error] Không thể gửi tin phản hồi: {e}")
+            time.sleep(0.5)
     else:
         # Nếu cả AI đều lỗi/không trả lời được
         fallback = (

@@ -641,21 +641,49 @@ def get_short_title(title):
         return " ".join(words[:6])
     return target
 
+def split_message(text, max_len=1900):
+    """Chia nhỏ tin nhắn thành nhiều phần nếu vượt quá giới hạn độ dài"""
+    if len(text) <= max_len:
+        return [text]
+        
+    parts = []
+    while text:
+        if len(text) <= max_len:
+            parts.append(text)
+            break
+            
+        split_idx = text.rfind('\n', 0, max_len)
+        if split_idx == -1:
+            split_idx = text.rfind(' ', 0, max_len)
+        if split_idx == -1:
+            split_idx = max_len
+            
+        parts.append(text[:split_idx].strip())
+        text = text[split_idx:].strip()
+    return parts
+
 def send_zalo_message(chat_id, text):
-    """Gửi tin nhắn phản hồi qua Zalo hỗ trợ định dạng Markdown"""
-    url = f"https://bot-api.zaloplatforms.com/bot{ZALO_API_TOKEN}/sendMessage"
-    
-    payload = {
-        "chat_id": chat_id,
-        "text": text,
-        "parse_mode": "markdown"
-    }
-    try:
-        r = requests.post(url, json=payload, timeout=10)
-        return r.json()
-    except Exception as e:
-        print(f"[Zalo API] Gửi tin nhắn lỗi: {e}")
-        return {}
+    """Gửi tin nhắn phản hồi qua Zalo hỗ trợ định dạng Markdown và tự động chia nhỏ nếu tin quá dài"""
+    parts = split_message(text, max_len=1900)
+    results = []
+    for part in parts:
+        if not part:
+            continue
+        url = f"https://bot-api.zaloplatforms.com/bot{ZALO_API_TOKEN}/sendMessage"
+        payload = {
+            "chat_id": chat_id,
+            "text": part,
+            "parse_mode": "markdown"
+        }
+        try:
+            r = requests.post(url, json=payload, timeout=10)
+            res_data = r.json()
+            results.append(res_data)
+            print(f"[Zalo API] Gửi tin nhắn (độ dài: {len(part)}): {res_data}")
+            time.sleep(0.5)
+        except Exception as e:
+            print(f"[Zalo API] Gửi tin nhắn lỗi: {e}")
+    return results[0] if results else {}
 
 def send_zalo_chat_action(chat_id, action="typing"):
     """Gửi trạng thái (như đang soạn tin nhắn) qua Zalo"""
