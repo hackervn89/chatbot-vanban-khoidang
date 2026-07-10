@@ -103,11 +103,67 @@ Bạn PHẢI trả lời bằng JSON hợp lệ với đúng cấu trúc sau (kh
 
 
 KIENTHUC_PATH = os.path.join(PROJECT_ROOT, "references", "kienthuc_dhtn.md")
+CHUNKS_PATH = os.path.join(PROJECT_ROOT, "references", "hdsd_chunks.json")
 KIENTHUC_CONTENT = ""
+CHUNKS_DATA = []
+CHUNKS_IDFS = {}
 
-def load_kienthuc():
-    """Tải bộ tri thức ĐHTN khi khởi chạy bot"""
-    global KIENTHUC_CONTENT
+def remove_accents(input_str):
+    s1 = u'ÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚÝàáâãèéêìíòóôõùúýĂăĐđĨĩŨũƠơƯưẠạẢảẤấẦầẨẩẪẫẬậẮắẰằẲẳẴẵẬậẸẹẺẻẼẽẾếỀềỂểỄễỆệỊịỌọỎỏỐốỒồỔổỖỗỘộỚớỜờỞởỠỡỢợỤụỦủỨứỪừỬửỮữỰựỲỳỶỷỸỹỴỵ'
+    s0 = u'AAAAEEEIIOOOOUUYaaaaeeeiioooouuyAaDdIiUuOoUuAaAaAaAaAaAaAaAaAaAaAaAaEeEeEeEeEeEeEeEeIiOoOoOoOoOoOoOoOoOoOoOoOoUuUuUuUuUuUuUuYyYyYyYy'
+    s = ""
+    for c in input_str:
+        if c in s1:
+            s += s0[s1.index(c)]
+        else:
+            s += c
+    return s
+
+def calculate_idfs(chunks):
+    import math
+    total_docs = len(chunks)
+    doc_counts = {}
+    for chunk in chunks:
+        unique_words = set(chunk["text_unsigned"].split())
+        path_words = chunk["source_unsigned"].replace("/", " ").replace("_", " ").replace(".", " ").split()
+        unique_words.update(path_words)
+        for word in unique_words:
+            if len(word) > 2:
+                doc_counts[word] = doc_counts.get(word, 0) + 1
+    idfs = {}
+    for word, count in doc_counts.items():
+        idfs[word] = math.log(total_docs / count)
+    return idfs
+
+def retrieve_chunks(question, chunks, idfs, top_n=3):
+    question_clean = remove_accents(question.lower())
+    words = [w for w in question_clean.split() if len(w) > 2]
+    if not words:
+        return []
+    scored_chunks = []
+    for chunk in chunks:
+        text_lower = chunk["text_unsigned"]
+        source_lower = chunk["source_unsigned"]
+        score = 0
+        for word in words:
+            if word not in idfs:
+                continue
+            idf = idfs[word]
+            word_score = 0
+            if word in text_lower:
+                tf = min(text_lower.count(word), 5)
+                word_score += tf * idf
+            if word in source_lower:
+                word_score += 80 * idf
+            score += word_score
+        if score > 0:
+            scored_chunks.append((score, chunk))
+    scored_chunks.sort(key=lambda x: x[0], reverse=True)
+    return [c[1] for c in scored_chunks[:top_n]]
+
+def load_knowledge_bases():
+    global KIENTHUC_CONTENT, CHUNKS_DATA, CHUNKS_IDFS
+    # 1. Tải kienthuc_dhtn.md
     if os.path.exists(KIENTHUC_PATH):
         try:
             with open(KIENTHUC_PATH, 'r', encoding='utf-8') as f:
@@ -118,7 +174,22 @@ def load_kienthuc():
     else:
         print(f"[Telegram Bot] Cảnh báo: Không tìm thấy tệp kiến thức tại: {KIENTHUC_PATH}")
 
-load_kienthuc()
+    # 2. Tải hdsd_chunks.json (RAG)
+    if os.path.exists(CHUNKS_PATH):
+        try:
+            with open(CHUNKS_PATH, 'r', encoding='utf-8') as f:
+                CHUNKS_DATA = json.load(f)
+            for chunk in CHUNKS_DATA:
+                chunk["text_unsigned"] = remove_accents(chunk["text"].lower())
+                chunk["source_unsigned"] = remove_accents(chunk["source"].lower())
+            CHUNKS_IDFS = calculate_idfs(CHUNKS_DATA)
+            print(f"[Telegram Bot] Đã tải RAG database ({len(CHUNKS_DATA)} chunks).")
+        except Exception as e:
+            print(f"[Telegram Bot] Lỗi khi tải RAG database: {e}")
+    else:
+        print(f"[Telegram Bot] Cảnh báo: Không tìm thấy tệp RAG tại: {CHUNKS_PATH}")
+
+load_knowledge_bases()
 
 DHTN_QA_SYSTEM_PROMPT = """Bạn là trợ lý ảo hỗ trợ người dùng hệ thống Điều hành tác nghiệp (ĐHTN - dhtn.dcs.vn).
 Nhiệm vụ của bạn là dựa vào Bộ Kiến Thức Hệ Thống ĐHTN được cung cấp dưới đây để trả lời các câu hỏi của người dùng một cách chính xác, ngắn gọn, lịch sự và dễ hiểu.
@@ -134,11 +205,22 @@ Dưới đây là Bộ Kiến Thức Hệ Thống ĐHTN để bạn tham chiếu
 === KẾT THÚC BỘ KIẾN THỨC ==="""
 
 def ask_dhtn_qa(question):
-    """Trả lời thắc mắc của người dùng dựa trên bộ tri thức ĐHTN"""
-    if not KIENTHUC_CONTENT:
+    """Trả lời thắc mắc của người dùng dựa trên bộ tri thức ĐHTN kết hợp RAG HDSD"""
+    if not KIENTHUC_CONTENT and not CHUNKS_DATA:
         return None, None
         
-    system_prompt = DHTN_QA_SYSTEM_PROMPT.format(kienthuc_content=KIENTHUC_CONTENT)
+    # Tìm kiếm tài liệu HDSD liên quan qua RAG
+    relevant_context = ""
+    if CHUNKS_DATA:
+        relevant_chunks = retrieve_chunks(question, CHUNKS_DATA, CHUNKS_IDFS, top_n=3)
+        if relevant_chunks:
+            relevant_context = "\n\nDưới đây là tài liệu hướng dẫn chi tiết trích từ HDSD hệ thống ĐHTN:\n"
+            for idx, chunk in enumerate(relevant_chunks):
+                relevant_context += f"--- Nguồn tài liệu: {chunk['source']} ---\n{chunk['text']}\n"
+                
+    system_prompt = DHTN_QA_SYSTEM_PROMPT.format(
+        kienthuc_content=KIENTHUC_CONTENT + relevant_context
+    )
     
     # 1. Thử DeepSeek trả phí trước
     if DEEPSEEK_API_KEY:
