@@ -305,9 +305,21 @@ def generate_and_send_word_doc(chat_id, metadata, sender_name):
     generate_document(data, TEMPLATE_PATH, output_docx_path)
 
     if os.path.exists(output_docx_path):
-        # Upload to file.io
-        download_link = upload_to_file_io(output_docx_path)
+        # Construct direct download link if SERVER_DOMAIN is configured, otherwise fallback to file.io
+        server_domain = os.environ.get('SERVER_DOMAIN', '').strip().rstrip('/')
         
+        # URL-encode the filename to make sure spaces/special characters in filename work in URLs
+        import urllib.parse
+        encoded_filename = urllib.parse.quote(docx_filename)
+        
+        if server_domain:
+            download_link = f"{server_domain}/download/{encoded_filename}"
+            link_desc = "tải trực tiếp từ server"
+        else:
+            print("[Zalo Bot] SERVER_DOMAIN chưa cấu hình. Dùng fallback file.io...")
+            download_link = upload_to_file_io(output_docx_path)
+            link_desc = "link bảo mật dùng 1 lần"
+            
         if download_link:
             msg = (
                 f"📊 KẾT QUẢ PHÂN TÍCH (Mô hình {metadata.get('model_used', 'Gemini')}):\n"
@@ -318,11 +330,11 @@ def generate_and_send_word_doc(chat_id, metadata, sender_name):
                 f"• Cơ quan tham mưu: {co_quan_2}\n\n"
                 f"🚀 Đã tạo văn bản Word thành công!\n"
                 f"📁 Tên file: {docx_filename}\n"
-                f"🔗 Tải xuống tại đây (Link bảo mật chỉ dùng 1 lần): {download_link}"
+                f"🔗 Tải xuống tại đây ({link_desc}): {download_link}"
             )
             send_zalo_message(chat_id, msg)
         else:
-            send_zalo_message(chat_id, "❌ Soạn văn bản thành công nhưng không thể upload tệp lên dịch vụ chia sẻ. Vui lòng liên hệ quản trị viên.")
+            send_zalo_message(chat_id, "❌ Soạn văn bản thành công nhưng không thể upload hoặc tạo liên kết tải về. Vui lòng liên hệ quản trị viên.")
     else:
         send_zalo_message(chat_id, "❌ Lỗi trong quá trình tạo tệp văn bản từ biểu mẫu Word.")
 
