@@ -9,3 +9,7 @@ __pycache__/
 taovanban_khoidang/output/
 taovanban_khoidang/scripts/temp/
 temp_git/
+
+# Heavy manual reference directories
+taovanban_khoidang/references/HDSD DHTN/
+taovanban_khoidang/references/TTHC/
