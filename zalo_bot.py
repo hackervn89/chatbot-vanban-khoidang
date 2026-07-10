@@ -284,22 +284,13 @@ def add_chat_message(chat_id, role, content):
         CONVERSATION_HISTORY[chat_id] = CONVERSATION_HISTORY[chat_id][-MAX_HISTORY_LEN:]
 
 def search_duckduckgo_free(query, max_results=3):
-    """Tìm kiếm DuckDuckGo không cần API Token để lấy thông tin thời gian thực"""
-    import urllib.parse
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36'
-    }
-    url = f"https://html.duckduckgo.com/html/?q={urllib.parse.quote(query)}"
+    """Tìm kiếm DuckDuckGo sử dụng thư viện ddgs để lấy thông tin thời gian thực"""
+    from ddgs import DDGS
     try:
-        r = requests.get(url, headers=headers, timeout=10)
-        if r.status_code == 200:
-            snippets = re.findall(r'<a class="result__snippet"[^>]*>(.*?)</a>', r.text, re.DOTALL)
-            results = []
-            for s in snippets[:max_results]:
-                clean_s = re.sub(r'<[^>]+>', '', s).strip()
-                clean_s = clean_s.replace('&amp;', '&').replace('&quot;', '"').replace('&#x27;', "'").replace('&lt;', '<').replace('&gt;', '>')
-                results.append(clean_s)
-            return results
+        with DDGS() as ddgs:
+            results = ddgs.text(query, max_results=max_results)
+            if results:
+                return [r["body"] for r in results if "body" in r]
     except Exception as e:
         print(f"[Search Error] {e}")
     return []
