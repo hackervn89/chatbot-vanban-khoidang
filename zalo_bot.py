@@ -5,6 +5,7 @@ import time
 import requests
 import json
 from pypdf import PdfReader
+from PIL import Image
 from google import genai
 from google.genai import types
 
@@ -123,6 +124,20 @@ def download_gdrive_file(url, output_path):
         return True
     return False
 
+def download_file_from_url(url, output_path):
+    """Tải tệp từ một URL bất kỳ (dùng cho ảnh trên server Zalo)"""
+    try:
+        response = requests.get(url, stream=True, timeout=15)
+        if response.status_code == 200:
+            with open(output_path, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+            return True
+    except Exception as e:
+        print(f"[Zalo API] Lỗi tải file từ URL: {e}")
+    return False
+
 def upload_to_file_io(file_path):
     """Tải tệp lên file.io và lấy link tải về dùng một lần (bảo mật)"""
     try:
@@ -135,7 +150,7 @@ def upload_to_file_io(file_path):
     return None
 
 def analyze_with_gemini(pdf_path):
-    """Hàm trích xuất dữ liệu bằng Gemini API (Giống Telegram)"""
+    """Hàm trích xuất dữ liệu bằng Gemini API (Đọc PDF)"""
     if not GEMINI_API_KEY:
         raise ValueError("Chưa cấu hình GEMINI_API_KEY")
         
@@ -176,6 +191,44 @@ def analyze_with_gemini(pdf_path):
             
     raise RuntimeError("Tất cả mô hình Gemini đều gặp lỗi hoặc trả về sai cấu trúc JSON.")
 
+def analyze_image_with_gemini(image_path):
+    """Hàm trích xuất dữ liệu từ ảnh chụp trang đầu bằng Gemini API (Đa phương thức)"""
+    if not GEMINI_API_KEY:
+        raise ValueError("Chưa cấu hình GEMINI_API_KEY")
+        
+    try:
+        img = Image.open(image_path)
+    except Exception as e:
+        raise RuntimeError(f"Không thể mở file ảnh: {e}")
+        
+    client = genai.Client(api_key=GEMINI_API_KEY)
+    
+    for model_name in GEMINI_MODELS:
+        try:
+            print(f"[Zalo API] Đang phân tích ảnh bằng mô hình: {model_name}")
+            response = client.models.generate_content(
+                model=model_name,
+                contents=[img, GEMINI_SYSTEM_PROMPT],
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    temperature=0.1,
+                ),
+            )
+            raw_text = response.text.strip()
+            data = json.loads(raw_text)
+            
+            # Kiểm tra định dạng trường
+            required_fields = ["doc_type", "number", "date", "authority", "title", "co_quan_2"]
+            if all(field in data for field in required_fields):
+                data["model_used"] = model_name
+                return data
+            else:
+                print(f"[Zalo API] Phản hồi thiếu trường từ {model_name}")
+        except Exception as e:
+            print(f"[Zalo API] Lỗi ở mô hình {model_name}: {e}")
+            
+    raise RuntimeError("Tất cả mô hình Gemini đều gặp lỗi hoặc trả về sai cấu trúc JSON.")
+
 def get_short_type(doc_type):
     """Lấy viết tắt thể loại văn bản."""
     dt = doc_type.lower()
@@ -193,7 +246,6 @@ def get_short_type(doc_type):
         return "QĐ"
     return "CV"
 
-
 def get_short_title(title):
     """Rút gọn trích yếu nội dung để đặt tên file."""
     match = re.search(r'về\s+(.*)', title, re.IGNORECASE)
@@ -206,7 +258,6 @@ def get_short_title(title):
     if len(words) > 6:
         return " ".join(words[:6])
     return target
-
 
 def send_zalo_message(chat_id, text):
     """Gửi tin nhắn phản hồi qua Zalo"""
@@ -222,24 +273,103 @@ def send_zalo_message(chat_id, text):
         print(f"[Zalo API] Gửi tin nhắn lỗi: {e}")
         return {}
 
+def generate_and_send_word_doc(chat_id, metadata, sender_name):
+    """Sinh văn bản Word từ dữ liệu đã phân tích và gửi trả link tải file.io"""
+    doc_type = metadata["doc_type"]
+    number = metadata["number"]
+    date_str = metadata["date"]
+    authority = metadata["authority"]
+    title = metadata["title"]
+    co_quan_2 = metadata["co_quan_2"]
+
+    van_ban_cap_tren = f"{doc_type} số {number}, ngày {date_str} của {authority} về {title}"
+    trich_yeu = f"V/v thực hiện {doc_type} số {number} ngày {date_str} của {authority}"
+
+    data = {
+        "van_ban_cap_tren": van_ban_cap_tren,
+        "Ngay_den_han_1": "",
+        "Co_quan_2": co_quan_2,
+        "ngay_den_han_2": "",
+        "TRICH_YEU_CONG_VAN": trich_yeu,
+        "DANH_SACH_NOI_NHAN": ["Thường trực Đảng ủy", "Các chi bộ trực thuộc", "Lưu VPĐU"]
+    }
+
+    # Generate output filename following naming convention
+    short_type = get_short_type(doc_type)
+    short_title = get_short_title(title)
+    docx_filename = f"CV tham mưu {short_type} TU về {short_title}.docx"
+    docx_filename = re.sub(r'[\\/*?:"<>|]', "", docx_filename)
+    output_docx_path = os.path.join(OUTPUT_DIR, docx_filename)
+
+    # Generate document
+    generate_document(data, TEMPLATE_PATH, output_docx_path)
+
+    if os.path.exists(output_docx_path):
+        # Upload to file.io
+        download_link = upload_to_file_io(output_docx_path)
+        
+        if download_link:
+            msg = (
+                f"📊 KẾT QUẢ PHÂN TÍCH (Mô hình {metadata.get('model_used', 'Gemini')}):\n"
+                f"• Loại văn bản: {doc_type}\n"
+                f"• Số hiệu: {number}\n"
+                f"• Ngày ban hành: {date_str}\n"
+                f"• Cơ quan ban hành: {authority}\n"
+                f"• Cơ quan tham mưu: {co_quan_2}\n\n"
+                f"🚀 Đã tạo văn bản Word thành công!\n"
+                f"📁 Tên file: {docx_filename}\n"
+                f"🔗 Tải xuống tại đây (Link bảo mật chỉ dùng 1 lần): {download_link}"
+            )
+            send_zalo_message(chat_id, msg)
+        else:
+            send_zalo_message(chat_id, "❌ Soạn văn bản thành công nhưng không thể upload tệp lên dịch vụ chia sẻ. Vui lòng liên hệ quản trị viên.")
+    else:
+        send_zalo_message(chat_id, "❌ Lỗi trong quá trình tạo tệp văn bản từ biểu mẫu Word.")
+
 def process_zalo_message(message):
-    """Xử lý tin nhắn nhận được"""
+    """Xử lý tin nhắn nhận được (chữ hoặc ảnh)"""
     chat_id = message.get("chat", {}).get("id")
     text = message.get("text", "").strip()
+    photo_url = message.get("photo", "").strip()
     sender_name = message.get("from", {}).get("display_name", "bạn")
     
     if not chat_id:
         return
         
-    # 1. Xử lý câu chào hỏi
+    # 1. Xử lý hình ảnh (Ảnh chụp trang đầu văn bản chỉ đạo)
+    if photo_url:
+        send_zalo_message(chat_id, "⏳ Đã nhận hình ảnh văn bản. Đang tiến hành tải ảnh và phân tích chữ bằng AI...")
+        
+        img_filename = f"zalo_ocr_{int(time.time())}.jpg"
+        img_path = os.path.join(TEMP_DIR, img_filename)
+        
+        if not download_file_from_url(photo_url, img_path):
+            send_zalo_message(chat_id, "❌ Không thể tải hình ảnh từ máy chủ Zalo. Vui lòng thử gửi lại.")
+            return
+            
+        try:
+            # Phân tích ảnh bằng Gemini
+            metadata = analyze_image_with_gemini(img_path)
+            
+            # Xử lý tạo tài liệu Word và gửi link tải
+            generate_and_send_word_doc(chat_id, metadata, sender_name)
+            
+        except Exception as e:
+            send_zalo_message(chat_id, f"❌ Đã xảy ra lỗi khi phân tích ảnh bằng AI: {str(e)}")
+        finally:
+            if os.path.exists(img_path):
+                os.remove(img_path)
+        return
+
+    # 2. Xử lý câu chào hỏi
     if text.lower() in ["xin chào", "chào bot", "hello", "hi", "bắt đầu"]:
         reply = (f"Chào {sender_name}! Tôi là Bot Chuyên viên số của Đảng uỷ xã.\n\n"
-                 "👉 Để soạn thảo văn bản tự động, hãy tải file PDF chỉ đạo lên Google Drive, "
-                 "thiết lập chia sẻ 'Bất kỳ ai có liên kết' và gửi link liên kết vào đây cho tôi.")
+                 "👉 **Cách 1 (Nhanh nhất):** Chụp ảnh rõ nét trang đầu của văn bản chỉ đạo và gửi trực tiếp vào đây.\n"
+                 "👉 **Cách 2:** Tải file PDF chỉ đạo lên Google Drive, chia sẻ chế độ công khai và gửi link vào đây.")
         send_zalo_message(chat_id, reply)
         return
 
-    # 2. Xử lý Google Drive Link
+    # 3. Xử lý Google Drive Link
     if "drive.google.com" in text:
         send_zalo_message(chat_id, "⏳ Đã nhận liên kết Google Drive. Đang tiến hành tải tệp và phân tích dữ liệu...")
         
@@ -252,60 +382,12 @@ def process_zalo_message(message):
             return
             
         try:
-            # Analyze with Gemini AI
+            # Phân tích PDF bằng Gemini
             metadata = analyze_with_gemini(pdf_path)
-
-            # Construct proper data dict for generate_document
-            doc_type = metadata["doc_type"]
-            number = metadata["number"]
-            date_str = metadata["date"]
-            authority = metadata["authority"]
-            title = metadata["title"]
-            co_quan_2 = metadata["co_quan_2"]
-
-            van_ban_cap_tren = f"{doc_type} số {number}, ngày {date_str} của {authority} về {title}"
-            trich_yeu = f"V/v thực hiện {doc_type} số {number} ngày {date_str} của {authority}"
-
-            data = {
-                "van_ban_cap_tren": van_ban_cap_tren,
-                "Ngay_den_han_1": "",
-                "Co_quan_2": co_quan_2,
-                "ngay_den_han_2": "",
-                "TRICH_YEU_CONG_VAN": trich_yeu,
-                "DANH_SACH_NOI_NHAN": ["Thường trực Đảng ủy", "Các chi bộ trực thuộc", "Lưu VPĐU"]
-            }
-
-            # Generate output filename following naming convention
-            short_type = get_short_type(doc_type)
-            short_title = get_short_title(title)
-            docx_filename = f"CV tham mưu {short_type} TU về {short_title}.docx"
-            docx_filename = re.sub(r'[\\/*?:"<>|]', "", docx_filename)
-            output_docx_path = os.path.join(OUTPUT_DIR, docx_filename)
-
-            # Generate document with correct parameter order: (data, template, output)
-            generate_document(data, TEMPLATE_PATH, output_docx_path)
-
-            if os.path.exists(output_docx_path):
-                # Upload to file.io
-                download_link = upload_to_file_io(output_docx_path)
-                
-                if download_link:
-                    msg = (
-                        f"📊 KẾT QUẢ PHÂN TÍCH (Mô hình {metadata.get('model_used', 'Gemini')}):\n"
-                        f"• Loại văn bản: {doc_type}\n"
-                        f"• Số hiệu: {number}\n"
-                        f"• Ngày ban hành: {date_str}\n"
-                        f"• Cơ quan ban hành: {authority}\n"
-                        f"• Cơ quan tham mưu: {co_quan_2}\n\n"
-                        f"🚀 Đã tạo văn bản Word thành công!\n"
-                        f"📁 Tên file: {docx_filename}\n"
-                        f"🔗 Tải xuống tại đây (Link bảo mật chỉ dùng 1 lần): {download_link}"
-                    )
-                    send_zalo_message(chat_id, msg)
-                else:
-                    send_zalo_message(chat_id, "❌ Soạn văn bản thành công nhưng không thể upload tệp lên dịch vụ chia sẻ. Vui lòng liên hệ quản trị viên.")
-            else:
-                send_zalo_message(chat_id, "❌ Lỗi trong quá trình tạo tệp văn bản từ biểu mẫu Word.")
+            
+            # Xử lý tạo tài liệu Word và gửi link tải
+            generate_and_send_word_doc(chat_id, metadata, sender_name)
+            
         except Exception as e:
             send_zalo_message(chat_id, f"❌ Đã xảy ra lỗi khi phân tích bằng AI: {str(e)}")
         finally:
@@ -313,7 +395,7 @@ def process_zalo_message(message):
                 os.remove(pdf_path)
     else:
         # Nhắc nhở cú pháp
-        reply = "Tôi không hiểu yêu cầu này. Hãy gửi một đường link Google Drive chứa file PDF văn bản cần xử lý nhé."
+        reply = "Tôi không hiểu yêu cầu này. Hãy gửi một ảnh chụp trang đầu văn bản chỉ đạo hoặc đường link Google Drive chứa file PDF nhé."
         send_zalo_message(chat_id, reply)
 
 def main():
@@ -323,7 +405,7 @@ def main():
         
     print("==================================================")
     print("🤖 Zalo Bot Chuyên viên số đang chạy...")
-    print("📌 Phiên bản: 1.0.3 (Đã sửa lỗi tham số generate_document)")
+    print("📌 Phiên bản: 1.0.4 (Hỗ trợ phân tích ảnh trực tiếp)")
     print("==================================================")
     
     # Xóa Webhook cũ để tránh xung đột với cơ chế getUpdates (Polling)
@@ -349,7 +431,7 @@ def main():
                     event_name = update.get("event_name")
                     message = update.get("message", {})
                     
-                    if event_name == "message.text.received" or "text" in message:
+                    if event_name in ["message.text.received", "message.image.received"] or "text" in message or "photo" in message:
                         process_zalo_message(message)
             time.sleep(1)
         except KeyboardInterrupt:

@@ -115,7 +115,7 @@ Nếu **tất cả 3 mô hình AI đều thất bại**, Telegram Bot sẽ tự 
 * Bot sẽ tự động xử lý và gửi trả lại tệp tin Word `.docx` hoàn chỉnh trực tiếp vào khung chat của bạn.
 
 ### 2. Trên Zalo Bot:
-* Do Zalo chưa hỗ trợ bot gửi/nhận tệp tin trực tiếp, chúng ta sử dụng luồng liên kết trung gian (Link):
-* Nhắn tin `Xin chào` để bắt đầu hội thoại và kiểm tra kết nối của Bot.
-* Tải file PDF chỉ đạo lên Google Drive của bạn $\rightarrow$ Bật quyền chia sẻ *"Bất kỳ ai có liên kết đều xem được"* $\rightarrow$ Copy link gửi cho Zalo Bot.
-* Bot sẽ tự động tải file $\rightarrow$ Phân tích và sinh văn bản Word $\rightarrow$ Trả về link tải file Word trực tiếp (Sử dụng dịch vụ chia sẻ bảo mật dùng 1 lần `file.io`, tự động xóa tệp sau khi tải xong để bảo mật dữ liệu).
+Do Zalo Bot cá nhân hạn chế gửi nhận tệp trực tiếp, bạn sử dụng 2 cách cực kỳ tiện lợi sau:
+*   **Cách 1 (Nhanh nhất - Khuyên dùng):** Chụp ảnh rõ nét trang đầu của văn bản chỉ đạo và gửi trực tiếp vào phòng chat Zalo. Bot sẽ sử dụng Gemini AI đa phương thức để tự quét ảnh, đọc chữ (OCR), trích xuất thông tin, soạn thảo văn bản Word và gửi link tải.
+*   **Cách 2:** Tải tệp PDF chỉ đạo lên Google Drive $\rightarrow$ Thiết lập chia sẻ "Bất kỳ ai có liên kết đều xem được" $\rightarrow$ Copy link gửi cho Zalo Bot.
+*   **Kết quả trả về:** Bot sẽ gửi link tải trực tiếp file Word kết quả qua dịch vụ chia sẻ bảo mật dùng 1 lần `file.io` (tự động hủy tệp sau khi tải xuống để bảo mật tuyệt đối).
