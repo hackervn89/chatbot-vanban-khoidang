@@ -273,12 +273,27 @@ def save_file_mapping(file_id, filename):
     except Exception as e:
         print(f"[Zalo Bot] Lỗi khi ghi file_map: {e}")
 
-def ask_dhtn_qa(question):
-    """Trả lời thắc mắc của người dùng dựa trên bộ tri thức ĐHTN kết hợp RAG HDSD"""
+MAX_HISTORY_LEN = 10  # 10 tin nhắn gần nhất (5 lượt hội thoại)
+CONVERSATION_HISTORY = {}
+
+def get_chat_history(chat_id):
+    if chat_id not in CONVERSATION_HISTORY:
+        CONVERSATION_HISTORY[chat_id] = []
+    return CONVERSATION_HISTORY[chat_id]
+
+def add_chat_message(chat_id, role, content):
+    if chat_id not in CONVERSATION_HISTORY:
+        CONVERSATION_HISTORY[chat_id] = []
+    CONVERSATION_HISTORY[chat_id].append({"role": role, "content": content})
+    if len(CONVERSATION_HISTORY[chat_id]) > MAX_HISTORY_LEN:
+        CONVERSATION_HISTORY[chat_id] = CONVERSATION_HISTORY[chat_id][-MAX_HISTORY_LEN:]
+
+def ask_dhtn_qa(chat_id, question):
+    """Trả lời thắc mắc của người dùng dựa trên bộ tri thức ĐHTN kết hợp RAG HDSD và giữ ngữ cảnh hội thoại"""
     if not KIENTHUC_CONTENT and not CHUNKS_DATA:
         return None, None
         
-    # Tìm kiếm tài liệu HDSD liên quan qua RAG
+    # Tìm kiếm tài liệu HDSD liên quan qua RAG dựa trên câu hỏi hiện tại
     relevant_context = ""
     if CHUNKS_DATA:
         relevant_chunks = retrieve_chunks(question, CHUNKS_DATA, CHUNKS_IDFS, top_n=3)
@@ -291,6 +306,8 @@ def ask_dhtn_qa(question):
         kienthuc_content=KIENTHUC_CONTENT + relevant_context
     )
     
+    history = get_chat_history(chat_id)
+    
     # 1. Thử DeepSeek trả phí trước
     if DEEPSEEK_API_KEY:
         url = "https://api.deepseek.com/chat/completions"
@@ -298,21 +315,25 @@ def ask_dhtn_qa(question):
             "Content-Type": "application/json",
             "Authorization": f"Bearer {DEEPSEEK_API_KEY}"
         }
+        
+        messages = [{"role": "system", "content": system_prompt}]
+        messages.extend(history)
+        messages.append({"role": "user", "content": question})
+        
         payload = {
             "model": "deepseek-chat",
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": question}
-            ],
+            "messages": messages,
             "temperature": 0.5
         }
         try:
-            print("[Zalo QA] Đang gửi câu hỏi tới DeepSeek...")
+            print(f"[Zalo QA] Đang gửi câu hỏi tới DeepSeek (Lịch sử: {len(history)} tin)...")
             response = requests.post(url, json=payload, headers=headers, timeout=25)
             if response.status_code == 200:
                 res_data = response.json()
                 reply = res_data["choices"][0]["message"]["content"].strip()
                 if reply:
+                    add_chat_message(chat_id, "user", question)
+                    add_chat_message(chat_id, "assistant", reply)
                     return reply, "DeepSeek-V3"
         except Exception as e:
             print(f"[Zalo QA] Lỗi gọi DeepSeek Q&A: {e}")
@@ -320,12 +341,29 @@ def ask_dhtn_qa(question):
     # 2. Thử Gemini làm dự phòng
     if GEMINI_API_KEY:
         client = genai.Client(api_key=GEMINI_API_KEY)
+        
+        gemini_contents = []
+        for msg in history:
+            role = "user" if msg["role"] == "user" else "model"
+            gemini_contents.append(
+                types.Content(
+                    role=role,
+                    parts=[types.Part.from_text(text=msg["content"])]
+                )
+            )
+        gemini_contents.append(
+            types.Content(
+                role="user",
+                parts=[types.Part.from_text(text=question)]
+            )
+        )
+        
         for model_name in GEMINI_MODELS:
             try:
-                print(f"[Zalo QA] Đang gửi câu hỏi tới Gemini ({model_name})...")
+                print(f"[Zalo QA] Đang gửi câu hỏi tới Gemini ({model_name}, Lịch sử: {len(history)} tin)...")
                 response = client.models.generate_content(
                     model=model_name,
-                    contents=question,
+                    contents=gemini_contents,
                     config=types.GenerateContentConfig(
                         system_instruction=system_prompt,
                         temperature=0.5,
@@ -333,6 +371,8 @@ def ask_dhtn_qa(question):
                 )
                 reply = response.text.strip()
                 if reply:
+                    add_chat_message(chat_id, "user", question)
+                    add_chat_message(chat_id, "assistant", reply)
                     return reply, model_name
             except Exception as e:
                 print(f"[Zalo QA] Lỗi gọi Gemini Q&A ({model_name}): {e}")
@@ -723,7 +763,7 @@ def process_zalo_message(message):
     # 2. Tất cả tin nhắn văn bản còn lại -> Chuyển sang Hỏi đáp nghiệp vụ (Q&A)
     if text:
         send_zalo_chat_action(chat_id, "typing")
-        reply_text, model_used = ask_dhtn_qa(text)
+        reply_text, model_used = ask_dhtn_qa(chat_id, text)
         
         if reply_text:
             footnote = f"\n\n(Dựa trên kiến thức được đào tạo)"
