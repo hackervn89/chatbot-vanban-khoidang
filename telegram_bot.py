@@ -234,6 +234,7 @@ Quy tắc trả lời:
 1. Đối với các câu hỏi về thao tác phần mềm Hệ thống Điều hành tác nghiệp (ĐHTN) hoặc Thủ tục hành chính (TTHC) Đảng: Bạn ưu tiên sử dụng thông tin chi tiết trong Bộ Kiến Thức Nghiệp Vụ được cung cấp dưới đây để trả lời chính xác các bước bấm nút, giao diện.
 2. Đối với các quy trình nghiệp vụ Đảng chung (như quy trình chuyển sinh hoạt Đảng, thủ tục kết nạp Đảng, đảng phí...) hoặc khi tài liệu được cung cấp chưa có hướng dẫn chi tiết: Bạn hãy sử dụng kiến thức chuyên môn sâu rộng của mình về Điều lệ Đảng, Quy định số 24-QĐ/TW, Hướng dẫn số 09-HD/BTCTW... để trả lời đầy đủ, cụ thể từng bước và đúng quy định của Đảng cho người dùng.
 3. Luôn giữ phong cách hành văn lịch sự, nhã nhặn, chuẩn mực công vụ Việt Nam.
+4. Khi hướng dẫn thao tác phần mềm, nếu tài liệu tham chiếu có đề cập đến hình ảnh minh họa (ví dụ: "Hình 1", "Hình 2"...), hãy giữ nguyên nhãn "Hình N" trong câu trả lời để hệ thống có thể tự động đính kèm ảnh minh họa tương ứng cho người dùng.
 
 Dưới đây là Bộ Kiến Thức Nghiệp Vụ để bạn tham chiếu:
 === BẮT ĐẦU BỘ KIẾN THỨC ===
@@ -876,21 +877,63 @@ def handle_text_questions(message):
 
     reply_text, model_used, relevant_results = ask_dhtn_qa(message.chat.id, question)
     if reply_text:
-        # Tự động phát hiện các hình ảnh liên quan từ RAG chunks
+        # Tự động phát hiện các hình ảnh liên quan từ NỘI DUNG RAG chunks VÀ reply_text
+        # AI model có thể giữ hoặc không giữ nhãn "Hình N" nên ta quét cả hai nguồn
         matched_images = []
-        # Quét các mẫu dạng "Hình N" trong câu trả lời
+        seen_images = set()  # Tránh gửi trùng ảnh
+        sources_with_images = set()  # Theo dõi sources đã có ảnh
+        
+        # Bước 1: Quét "Hình N" trong CÂU TRẢ LỜI AI (nếu AI giữ nhãn)
         for match in re.finditer(r'Hình\s+(\d+)', reply_text, re.IGNORECASE):
             hinh_num = match.group(1)
             hinh_key = f"Hình {hinh_num}"
-            # Tìm trong các nguồn tài liệu của RAG chunks
             for score, chunk in relevant_results:
-                source = chunk.get('source')
+                source = chunk.get('source', '')
                 if source in IMAGE_MAP_DATA and hinh_key in IMAGE_MAP_DATA[source]:
                     img_rel_path = IMAGE_MAP_DATA[source][hinh_key]
                     img_local_path = os.path.join(OUTPUT_DIR, img_rel_path)
-                    if os.path.exists(img_local_path):
+                    if os.path.exists(img_local_path) and img_rel_path not in seen_images:
                         matched_images.append((hinh_key, img_local_path, img_rel_path))
-                        break # Tìm thấy ảnh đầu tiên khớp nguồn thì dừng
+                        seen_images.add(img_rel_path)
+                        sources_with_images.add(source)
+                        break
+        
+        # Bước 2: Quét "Hình N" trong NỘI DUNG RAG chunks (bổ sung thêm nếu chưa đủ)
+        if len(matched_images) < 5:
+            for score, chunk in relevant_results:
+                source = chunk.get('source', '')
+                if source not in IMAGE_MAP_DATA:
+                    continue
+                for match in re.finditer(r'Hình\s+(\d+)', chunk.get('text', '')):
+                    hinh_num = match.group(1)
+                    hinh_key = f"Hình {hinh_num}"
+                    if hinh_key in IMAGE_MAP_DATA[source]:
+                        img_rel_path = IMAGE_MAP_DATA[source][hinh_key]
+                        img_local_path = os.path.join(OUTPUT_DIR, img_rel_path)
+                        if os.path.exists(img_local_path) and img_rel_path not in seen_images:
+                            matched_images.append((hinh_key, img_local_path, img_rel_path))
+                            seen_images.add(img_rel_path)
+                            sources_with_images.add(source)
+                if len(matched_images) >= 5:
+                    break
+        
+        # Bước 3: Fallback - nếu chưa tìm thấy ảnh nào, gửi Hình 1 từ mỗi source liên quan
+        if not matched_images:
+            for score, chunk in relevant_results:
+                source = chunk.get('source', '')
+                if source in IMAGE_MAP_DATA and source not in sources_with_images:
+                    if "Hình 1" in IMAGE_MAP_DATA[source]:
+                        img_rel_path = IMAGE_MAP_DATA[source]["Hình 1"]
+                        img_local_path = os.path.join(OUTPUT_DIR, img_rel_path)
+                        if os.path.exists(img_local_path) and img_rel_path not in seen_images:
+                            matched_images.append(("Hình 1", img_local_path, img_rel_path))
+                            seen_images.add(img_rel_path)
+                            sources_with_images.add(source)
+                if len(matched_images) >= 3:  # Giới hạn fallback 3 ảnh
+                    break
+        
+        print(f"[Telegram QA] Matched images: {len(matched_images)}")
+
 
         # Chèn link ảnh nếu cấu hình SERVER_DOMAIN
         server_domain = os.environ.get('SERVER_DOMAIN', '').strip().rstrip('/')
