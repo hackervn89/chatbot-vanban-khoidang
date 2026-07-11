@@ -45,6 +45,12 @@ def download_file(filename):
     print(f"[File Server] Đang tải file (Trực tiếp): {filename}")
     return send_from_directory(OUTPUT_DIR, filename, as_attachment=True)
 
+@app.route('/images/<path:filepath>')
+def serve_static_image(filepath):
+    images_dir = os.path.join(OUTPUT_DIR, "images")
+    print(f"[File Server] Đang tải ảnh: {filepath}")
+    return send_from_directory(images_dir, filepath)
+
 def run_web_server():
     port = int(os.environ.get("PORT", 8080))
     print(f"Starting Flask File Server on port {port}...")

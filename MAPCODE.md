@@ -193,6 +193,12 @@
 ### `taovanban_khoidang/scripts/input_84.json` (18 dòng)
 **Vai trò:** Dữ liệu JSON mẫu cho Kế hoạch 84-KH/TU (dùng để test).
 
+### `taovanban_khoidang/scripts/extract_manual_images.py` [NEW] (125 dòng)
+**Vai trò:** Trích xuất ảnh chụp màn hình hướng dẫn và lập bản đồ liên kết:
+- Quét toàn bộ `.docx` trong `references/HDSD DHTN/`.
+- Phân tích XML để đối chiếu hình ảnh với thẻ `Hình N`.
+- Giải nén các ảnh liên quan vào `output/images/` và ghi đè file mapping `image_map.json`.
+
 ### `taovanban_khoidang/SKILL.md` (199 dòng)
 **Vai trò:** Tài liệu kỹ năng chi tiết cho AI agent — mô tả đầy đủ 6 quy tắc nghiệp vụ, 5 cơ quan cấp xã, disambiguation rules, formatting standards, naming convention.
 

@@ -67,6 +67,8 @@ bot = telebot.TeleBot(API_TOKEN)
 TEMPLATE_PATH = os.path.join(PROJECT_ROOT, "references", "cong_van_giao_viec_mau.docx")
 OUTPUT_DIR = os.path.join(PROJECT_ROOT, "output")
 TEMP_DIR = os.path.join(PROJECT_ROOT, "scripts", "temp")
+IMAGE_MAP_PATH = os.path.join(OUTPUT_DIR, "images", "image_map.json")
+IMAGE_MAP_DATA = {}
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 os.makedirs(TEMP_DIR, exist_ok=True)
@@ -187,7 +189,7 @@ def retrieve_chunks(question, chunks, idfs, top_n=3):
 
 
 def load_knowledge_bases():
-    global KIENTHUC_CONTENT, CHUNKS_DATA, CHUNKS_IDFS
+    global KIENTHUC_CONTENT, CHUNKS_DATA, CHUNKS_IDFS, IMAGE_MAP_DATA
     # 1. Tải kienthuc_dhtn.md
     if os.path.exists(KIENTHUC_PATH):
         try:
@@ -213,6 +215,15 @@ def load_knowledge_bases():
             print(f"[Telegram Bot] Lỗi khi tải RAG database: {e}")
     else:
         print(f"[Telegram Bot] Cảnh báo: Không tìm thấy tệp RAG tại: {CHUNKS_PATH}")
+
+    # 3. Tải bản đồ hình ảnh
+    if os.path.exists(IMAGE_MAP_PATH):
+        try:
+            with open(IMAGE_MAP_PATH, 'r', encoding='utf-8') as f:
+                IMAGE_MAP_DATA = json.load(f)
+            print(f"[Telegram Bot] Đã tải bản đồ hình ảnh ({len(IMAGE_MAP_DATA)} tài liệu).")
+        except Exception as e:
+            print(f"[Telegram Bot] Lỗi khi tải bản đồ hình ảnh: {e}")
 
 load_knowledge_bases()
 
@@ -259,7 +270,7 @@ def search_duckduckgo_free(query, max_results=3):
 def ask_dhtn_qa(chat_id, question):
     """Trả lời thắc mắc của người dùng dựa trên bộ tri thức ĐHTN kết hợp RAG HDSD và giữ ngữ cảnh hội thoại, chỉ dùng DeepSeek làm mô hình chính"""
     if not KIENTHUC_CONTENT and not CHUNKS_DATA:
-        return None, None
+        return None, None, []
         
     history = get_chat_history(chat_id)
     best_score = 0
@@ -313,7 +324,7 @@ def ask_dhtn_qa(chat_id, question):
                 if reply:
                     add_chat_message(chat_id, "user", question)
                     add_chat_message(chat_id, "assistant", reply)
-                    return reply, "DeepSeek-V3"
+                    return reply, "DeepSeek-V3", relevant_results
         except Exception as e:
             print(f"[Telegram QA] Lỗi gọi DeepSeek Q&A: {e}")
             
@@ -360,11 +371,11 @@ def ask_dhtn_qa(chat_id, question):
                 if reply:
                     add_chat_message(chat_id, "user", question)
                     add_chat_message(chat_id, "assistant", reply)
-                    return reply, model_name
+                    return reply, model_name, relevant_results
             except Exception as e:
                 print(f"[Telegram QA] Lỗi gọi Gemini dự phòng: {e}")
                 
-    return None, None
+    return None, None, []
 
 def analyze_with_gemini(pdf_text):
     """
@@ -863,8 +874,32 @@ def handle_text_questions(message):
             text = text[split_idx:].strip()
         return parts
 
-    reply_text, model_used = ask_dhtn_qa(message.chat.id, question)
+    reply_text, model_used, relevant_results = ask_dhtn_qa(message.chat.id, question)
     if reply_text:
+        # Tự động phát hiện các hình ảnh liên quan từ RAG chunks
+        matched_images = []
+        # Quét các mẫu dạng "Hình N" trong câu trả lời
+        for match in re.finditer(r'Hình\s+(\d+)', reply_text, re.IGNORECASE):
+            hinh_num = match.group(1)
+            hinh_key = f"Hình {hinh_num}"
+            # Tìm trong các nguồn tài liệu của RAG chunks
+            for score, chunk in relevant_results:
+                source = chunk.get('source')
+                if source in IMAGE_MAP_DATA and hinh_key in IMAGE_MAP_DATA[source]:
+                    img_rel_path = IMAGE_MAP_DATA[source][hinh_key]
+                    img_local_path = os.path.join(OUTPUT_DIR, img_rel_path)
+                    if os.path.exists(img_local_path):
+                        matched_images.append((hinh_key, img_local_path, img_rel_path))
+                        break # Tìm thấy ảnh đầu tiên khớp nguồn thì dừng
+
+        # Chèn link ảnh nếu cấu hình SERVER_DOMAIN
+        server_domain = os.environ.get('SERVER_DOMAIN', '').strip().rstrip('/')
+        if server_domain and matched_images:
+            for hinh_key, local_path, rel_path in matched_images:
+                img_url = f"{server_domain}/{rel_path}"
+                # Chuyển chữ "Hình X" thành link click được dạng Markdown
+                reply_text = re.sub(rf'({hinh_key}\b)', r'[\1](' + img_url + ')', reply_text, flags=re.IGNORECASE)
+
         footnote = f"\n\n*Dựa trên kiến thức được đào tạo.*"
         full_msg = reply_text + footnote
         parts = split_message(full_msg, max_len=3800)
@@ -888,6 +923,19 @@ def handle_text_questions(message):
                         else:
                             print(f"[Telegram QA Error] Không thể gửi phần {i}/{total_parts} sau {max_retries + 1} lần thử: {e}")
             time.sleep(0.5)
+
+        # Gửi trực tiếp ảnh đính kèm (nếu tìm thấy ảnh cục bộ)
+        sent_images = set()
+        for hinh_key, local_path, rel_path in matched_images:
+            if local_path not in sent_images:
+                try:
+                    with open(local_path, 'rb') as photo_file:
+                        bot.send_photo(message.chat.id, photo_file, caption=f"📸 Ảnh minh họa: {hinh_key}")
+                    print(f"[Telegram QA] Đã gửi trực tiếp ảnh minh họa {hinh_key}")
+                    sent_images.add(local_path)
+                except Exception as e:
+                    print(f"[Telegram Bot Error] Không thể gửi ảnh {hinh_key}: {e}")
+                time.sleep(0.5)
     else:
         # Nếu cả AI đều lỗi/không trả lời được
         fallback = (

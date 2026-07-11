@@ -57,6 +57,8 @@ OUTPUT_DIR = os.path.join(PROJECT_ROOT, "output")
 TEMP_DIR = os.path.join(PROJECT_ROOT, "scripts", "temp")
 MAP_FILE = os.path.join(TEMP_DIR, "file_map.json")
 KIENTHUC_PATH = os.path.join(PROJECT_ROOT, "references", "kienthuc_dhtn.md")
+IMAGE_MAP_PATH = os.path.join(OUTPUT_DIR, "images", "image_map.json")
+IMAGE_MAP_DATA = {}
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 os.makedirs(TEMP_DIR, exist_ok=True)
@@ -144,7 +146,7 @@ def retrieve_chunks(question, chunks, idfs, top_n=3):
 
 
 def load_knowledge_bases():
-    global KIENTHUC_CONTENT, CHUNKS_DATA, CHUNKS_IDFS
+    global KIENTHUC_CONTENT, CHUNKS_DATA, CHUNKS_IDFS, IMAGE_MAP_DATA
     # 1. Tải kienthuc_dhtn.md
     if os.path.exists(KIENTHUC_PATH):
         try:
@@ -170,6 +172,15 @@ def load_knowledge_bases():
             print(f"[Zalo Bot] Lỗi khi tải RAG database: {e}")
     else:
         print(f"[Zalo Bot] Cảnh báo: Không tìm thấy tệp RAG tại: {CHUNKS_PATH}")
+
+    # 3. Tải bản đồ hình ảnh
+    if os.path.exists(IMAGE_MAP_PATH):
+        try:
+            with open(IMAGE_MAP_PATH, 'r', encoding='utf-8') as f:
+                IMAGE_MAP_DATA = json.load(f)
+            print(f"[Zalo Bot] Đã tải bản đồ hình ảnh ({len(IMAGE_MAP_DATA)} tài liệu).")
+        except Exception as e:
+            print(f"[Zalo Bot] Lỗi khi tải bản đồ hình ảnh: {e}")
 
 load_knowledge_bases()
 
@@ -322,7 +333,7 @@ def search_duckduckgo_free(query, max_results=3):
 def ask_dhtn_qa(chat_id, question):
     """Trả lời thắc mắc của người dùng dựa trên bộ tri thức ĐHTN kết hợp RAG HDSD và giữ ngữ cảnh hội thoại, chỉ dùng DeepSeek làm mô hình chính"""
     if not KIENTHUC_CONTENT and not CHUNKS_DATA:
-        return None, None
+        return None, None, []
         
     history = get_chat_history(chat_id)
     best_score = 0
@@ -376,7 +387,7 @@ def ask_dhtn_qa(chat_id, question):
                 if reply:
                     add_chat_message(chat_id, "user", question)
                     add_chat_message(chat_id, "assistant", reply)
-                    return reply, "DeepSeek-V3"
+                    return reply, "DeepSeek-V3", relevant_results
         except Exception as e:
             print(f"[QA] Lỗi gọi DeepSeek Q&A: {e}")
             
@@ -423,11 +434,11 @@ def ask_dhtn_qa(chat_id, question):
                 if reply:
                     add_chat_message(chat_id, "user", question)
                     add_chat_message(chat_id, "assistant", reply)
-                    return reply, model_name
+                    return reply, model_name, relevant_results
             except Exception as e:
                 print(f"[QA] Lỗi gọi Gemini dự phòng: {e}")
                 
-    return None, None
+    return None, None, []
 
 def analyze_with_deepseek(text):
     """Phân tích văn bản sử dụng Deepseek Chat API (Có phí, ưu tiên hàng đầu)"""
@@ -857,11 +868,45 @@ def process_zalo_message(message):
     # 2. Tất cả tin nhắn văn bản còn lại -> Chuyển sang Hỏi đáp nghiệp vụ (Q&A)
     if text:
         send_zalo_chat_action(chat_id, "typing")
-        reply_text, model_used = ask_dhtn_qa(chat_id, text)
+        reply_text, model_used, relevant_results = ask_dhtn_qa(chat_id, text)
         
         if reply_text:
+            # Tự động phát hiện các hình ảnh liên quan từ RAG chunks
+            matched_images = []
+            for match in re.finditer(r'Hình\s+(\d+)', reply_text, re.IGNORECASE):
+                hinh_num = match.group(1)
+                hinh_key = f"Hình {hinh_num}"
+                for score, chunk in relevant_results:
+                    source = chunk.get('source')
+                    if source in IMAGE_MAP_DATA and hinh_key in IMAGE_MAP_DATA[source]:
+                        img_rel_path = IMAGE_MAP_DATA[source][hinh_key]
+                        img_local_path = os.path.join(OUTPUT_DIR, img_rel_path)
+                        if os.path.exists(img_local_path):
+                            matched_images.append((hinh_key, img_rel_path))
+                            break
+
+            # Chèn link ảnh nếu cấu hình SERVER_DOMAIN
+            server_domain = os.environ.get('SERVER_DOMAIN', '').strip().rstrip('/')
+            image_links_text = ""
+            if server_domain and matched_images:
+                for hinh_key, rel_path in matched_images:
+                    img_url = f"{server_domain}/{rel_path}"
+                    # Chuyển chữ "Hình X" thành link click được dạng Markdown
+                    reply_text = re.sub(rf'({hinh_key}\b)', r'[\1](' + img_url + ')', reply_text, flags=re.IGNORECASE)
+            elif matched_images:
+                # Nếu không có SERVER_DOMAIN riêng, tải lên file.io tạm thời để lấy link xem ảnh
+                image_links_text = "\n\n📷 Ảnh minh họa thao tác:\n"
+                for hinh_key, rel_path in matched_images:
+                    img_local_path = os.path.join(OUTPUT_DIR, rel_path)
+                    try:
+                        img_url = upload_to_file_io(img_local_path)
+                        if img_url:
+                            image_links_text += f"- {hinh_key}: {img_url}\n"
+                    except Exception as e:
+                        print(f"[Zalo Bot Error] Không thể upload ảnh {hinh_key} lên file.io: {e}")
+
             footnote = f"\n\n(Bạn cần kiểm tra lại thông tin trước khi sử dụng)"
-            send_zalo_message(chat_id, reply_text + footnote)
+            send_zalo_message(chat_id, reply_text + image_links_text + footnote)
         else:
             # Nhắc nhở nếu lỗi hệ thống
             reply = (
