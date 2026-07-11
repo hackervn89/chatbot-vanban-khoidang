@@ -54,6 +54,9 @@ Giao diện hệ thống được chia thành 3 vùng chính:
 
 ### 2.1. Cách đăng nhập vào hệ thống
 **Điều kiện tiên quyết:** Có tài khoản (tên đăng nhập + mật khẩu) do quản trị viên cấp.
+* **Mật khẩu mặc định:** Đối với tài khoản mới khởi tạo, mật khẩu mặc định là **`222222aA+`** (gồm 6 số 2, ký tự `a` thường, `A` hoa và dấu `+`).
+* **Lưu ý đăng nhập lần đầu:** Người dùng nhập mã OTP được gửi về số điện thoại đăng ký, sau đó hệ thống sẽ yêu cầu thay đổi mật khẩu mặc định sang mật khẩu cá nhân mới.
+* **Thời gian lưu phiên đăng nhập:** Phiên đăng nhập qua OTP sẽ được trình duyệt ghi nhớ trong vòng **30 ngày** (nếu đổi trình duyệt hoặc xóa cookie/cache sẽ cần xác thực lại).
 
 **Các bước thực hiện:**
 1. Mở trình duyệt **Google Chrome** hoặc **Microsoft Edge** trên máy tính.
@@ -325,6 +328,7 @@ Bộ lọc ở góc trên màn hình danh sách:
    - **Nội dung báo cáo:** Viết chi tiết phần việc đã làm, kết quả đạt được, khó khăn vướng mắc (nếu có).
    - **Tài liệu đính kèm:** Chọn file báo cáo/sản phẩm công việc từ máy tính tải lên làm minh chứng.
 4. **Ghi lại:** Bấm **"Ghi lại"** để lưu. Nếu nhập 100%, nhiệm vụ tự động chuyển sang trạng thái *Chờ xác nhận hoàn thành* từ phía Lãnh đạo.
+* **Quy tắc trễ hạn:** Trường hợp nhiệm vụ được hoàn thành 100% nhưng trễ hơn so với ngày đến hạn đã được giao, hệ thống sẽ tự động cập nhật trạng thái của nhiệm vụ đó thành **"Hoàn thành quá hạn"**.
 
 ### 7.4. Trao đổi và thảo luận công việc
 1. Nhấp đúp vào nhiệm vụ → chọn tab **"Thảo luận"** ở góc dưới.
@@ -366,6 +370,10 @@ Chức năng Lịch họp cung cấp toàn bộ lịch công tác, lịch họp 
 ### 8.5. Lịch tuần lãnh đạo
 - Hiển thị lịch công tác riêng của các đồng chí Thường trực Đảng ủy/Lãnh đạo đơn vị.
 
+### 8.6. Quy tắc khi tạo lịch họp mới (Dành cho Quản trị viên/Văn thư phụ trách)
+* **Thời lượng mặc định:** Khi khởi tạo cuộc họp mới, hệ thống sẽ tự động gán thời lượng mặc định của cuộc họp là **1 giờ**. Nếu cuộc họp kéo dài hơn, người tạo lịch cần chủ động chỉnh sửa lại thời gian kết thúc.
+* **Người chủ trì bắt buộc:** Mỗi cuộc họp được tạo trên hệ thống **bắt buộc** phải cấu hình trường **Người chủ trì** (Host - Ví dụ: Bí thư, Phó Bí thư, Chánh văn phòng, v.v.). Nếu để trống trường này, hệ thống sẽ chặn không cho lưu cuộc họp.
+
 ---
 
 ## 9. MODULE QUẢN LÝ HỒ SƠ
@@ -378,6 +386,10 @@ Gom nhóm các văn bản đến, văn bản đi và phiếu trình có liên qu
 - **Thêm văn bản vào hồ sơ:** Khi xem chi tiết văn bản đến/đi/phiếu trình, chọn lưu vào hồ sơ tương ứng.
 - **Bàn giao hồ sơ:** Chuyển quyền sở hữu hồ sơ cho người khác (ví dụ: khi chuyển công tác, nghỉ phép dài ngày).
 - **Chia sẻ hồ sơ:** Cho phép người khác xem hồ sơ (chỉ quyền xem, không sửa/xóa).
+
+### 9.3. Quy tắc lưu trữ hồ sơ tài liệu
+* **Đếm số trang khi tải lên:** Khi người dùng quét (scan) từ tài liệu giấy hoặc tải lên các file đính kèm để lưu trữ vào hồ sơ công việc, bắt buộc phải đếm và điền số lượng trang thực tế của từng tài liệu đính kèm.
+* **Tổng số trang bắt buộc khi kết thúc hồ sơ:** Khi hoàn thành/đóng luồng hoặc thực hiện lưu trữ chính thức ("kết thúc") hồ sơ, hệ thống yêu cầu **bắt buộc phải có Tổng số trang tài liệu** trong hồ sơ. Nếu thiếu thông tin này, hệ thống sẽ báo lỗi và chặn không cho hoàn tất thủ tục lưu trữ/kết thúc hồ sơ.
 
 ---
 
@@ -428,6 +440,12 @@ Dành cho quản trị viên (Admin) hệ thống. Người dùng thông thườ
 - **Quản lý đơn vị/phòng ban:** Cập nhật cơ cấu tổ chức, sơ đồ cây đơn vị.
 - **Quản lý sổ văn bản:** Tạo và quản lý các sổ văn bản đến/đi của đơn vị.
 - **Cấu hình hệ thống:** Thiết lập các thông số vận hành.
+
+### 13.3. Quy tắc cấu hình chữ ký số và con dấu đơn vị
+* **Ảnh chữ ký Lãnh đạo:** Khi tải lên ảnh chữ ký số cá nhân cho Lãnh đạo (có thể thực hiện bởi Admin hoặc chính người dùng trong trang thông tin cá nhân), ảnh chữ ký phải được cắt sát, định dạng **PNG** và **bắt buộc phải xóa hoàn toàn nền trắng (nền trong suốt)**.
+* **Ảnh con dấu đơn vị (Unit symbol):** Khi cấu hình ảnh con dấu tròn của đơn vị, chiều cao (Height) của ảnh phải được thiết lập là **110**.
+* **Ảnh dấu chỉ đạo/xác nhận phụ (Confirmation symbol):** Chiều rộng (Width) của ảnh dấu được hệ thống khuyến nghị đặt là **680** (kích thước tối ưu giúp hiển thị cân đối và khớp chính xác nhất với mẫu văn bản giấy và chữ ký).
+* **Quyền quản lý hình ảnh dấu/logo:** Cả **Quản trị viên hệ thống (Admin)** và cán bộ **Văn thư (Clerk)** đều có thẩm quyền cập nhật, quản lý và chỉnh sửa danh mục hình ảnh con dấu/logo của đơn vị.
 
 ---
 
