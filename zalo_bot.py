@@ -641,8 +641,8 @@ def get_short_title(title):
         return " ".join(words[:6])
     return target
 
-def split_message(text, max_len=1900):
-    """Chia nhỏ tin nhắn thành nhiều phần nếu vượt quá giới hạn độ dài"""
+def split_message(text, max_len=1800):
+    """Chia nhỏ tin nhắn thành nhiều phần, ưu tiên chia ở ranh giới đoạn văn"""
     if len(text) <= max_len:
         return [text]
         
@@ -651,9 +651,14 @@ def split_message(text, max_len=1900):
         if len(text) <= max_len:
             parts.append(text)
             break
-            
-        split_idx = text.rfind('\n', 0, max_len)
+        
+        # Ưu tiên 1: Chia ở dấu đoạn trống (\n\n)
+        split_idx = text.rfind('\n\n', 0, max_len)
         if split_idx == -1:
+            # Ưu tiên 2: Chia ở dấu xuống dòng (\n)
+            split_idx = text.rfind('\n', 0, max_len)
+        if split_idx == -1:
+            # Ưu tiên 3: Chia ở dấu cách
             split_idx = text.rfind(' ', 0, max_len)
         if split_idx == -1:
             split_idx = max_len
@@ -663,10 +668,11 @@ def split_message(text, max_len=1900):
     return parts
 
 def send_zalo_message(chat_id, text):
-    """Gửi tin nhắn phản hồi qua Zalo hỗ trợ định dạng Markdown và tự động chia nhỏ nếu tin quá dài"""
-    parts = split_message(text, max_len=1900)
+    """Gửi tin nhắn phản hồi qua Zalo hỗ trợ định dạng Markdown và tự động chia nhỏ nếu tin quá dài, có retry khi lỗi"""
+    parts = split_message(text, max_len=1800)
     results = []
-    for part in parts:
+    total_parts = len(parts)
+    for i, part in enumerate(parts, 1):
         if not part:
             continue
         url = f"https://bot-api.zaloplatforms.com/bot{ZALO_API_TOKEN}/sendMessage"
@@ -675,15 +681,25 @@ def send_zalo_message(chat_id, text):
             "text": part,
             "parse_mode": "markdown"
         }
-        try:
-            r = requests.post(url, json=payload, timeout=10)
-            res_data = r.json()
-            results.append(res_data)
-            print(f"[Zalo API] Gửi tin nhắn (độ dài: {len(part)}): {res_data}")
-            time.sleep(0.5)
-        except Exception as e:
-            print(f"[Zalo API] Gửi tin nhắn lỗi: {e}")
-    return results[0] if results else {}
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                r = requests.post(url, json=payload, timeout=10)
+                res_data = r.json()
+                results.append(res_data)
+                print(f"[Zalo API] Đã gửi phần {i}/{total_parts} ({len(part)} ký tự): {res_data}")
+                break
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    wait_time = (attempt + 1) * 1.5  # 1.5s, 3s, 4.5s
+                    print(f"[Zalo API] Lỗi gửi phần {i}/{total_parts}, thử lại sau {wait_time}s... ({e})")
+                    time.sleep(wait_time)
+                else:
+                    print(f"[Zalo API Error] Không thể gửi phần {i}/{total_parts} sau {max_retries} lần: {e}")
+        # Chờ giữa các phần để tránh rate limit
+        if i < total_parts:
+            time.sleep(1.0)
+    return results
 
 def send_zalo_chat_action(chat_id, action="typing"):
     """Gửi trạng thái (như đang soạn tin nhắn) qua Zalo"""

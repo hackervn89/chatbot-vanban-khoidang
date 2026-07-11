@@ -2,6 +2,7 @@ import os
 import re
 import sys
 import json
+import time
 import requests
 import telebot
 from pypdf import PdfReader
@@ -817,7 +818,8 @@ def handle_text_questions(message):
         
     bot.send_chat_action(message.chat.id, 'typing')
     
-    def split_message(text, max_len=4000):
+    def split_message(text, max_len=3800):
+        """Chia nhỏ tin nhắn thành nhiều phần, ưu tiên chia ở ranh giới đoạn văn"""
         if len(text) <= max_len:
             return [text]
         parts = []
@@ -825,8 +827,13 @@ def handle_text_questions(message):
             if len(text) <= max_len:
                 parts.append(text)
                 break
-            split_idx = text.rfind('\n', 0, max_len)
+            # Ưu tiên 1: Chia ở dấu đoạn trống (\n\n)
+            split_idx = text.rfind('\n\n', 0, max_len)
             if split_idx == -1:
+                # Ưu tiên 2: Chia ở dấu xuống dòng (\n)
+                split_idx = text.rfind('\n', 0, max_len)
+            if split_idx == -1:
+                # Ưu tiên 3: Chia ở dấu cách
                 split_idx = text.rfind(' ', 0, max_len)
             if split_idx == -1:
                 split_idx = max_len
@@ -838,15 +845,26 @@ def handle_text_questions(message):
     if reply_text:
         footnote = f"\n\n*Dựa trên kiến thức được đào tạo.*"
         full_msg = reply_text + footnote
-        parts = split_message(full_msg, max_len=4000)
-        for part in parts:
-            try:
-                bot.reply_to(message, part, parse_mode='Markdown')
-            except Exception:
+        parts = split_message(full_msg, max_len=3800)
+        total_parts = len(parts)
+        for i, part in enumerate(parts, 1):
+            max_retries = 2
+            for attempt in range(max_retries + 1):
                 try:
-                    bot.reply_to(message, part)
-                except Exception as e:
-                    print(f"[Telegram QA Error] Không thể gửi tin phản hồi: {e}")
+                    bot.reply_to(message, part, parse_mode='Markdown')
+                    print(f"[Telegram QA] Đã gửi phần {i}/{total_parts} ({len(part)} ký tự)")
+                    break
+                except Exception:
+                    try:
+                        bot.reply_to(message, part)
+                        print(f"[Telegram QA] Đã gửi phần {i}/{total_parts} ({len(part)} ký tự) [không Markdown]")
+                        break
+                    except Exception as e:
+                        if attempt < max_retries:
+                            print(f"[Telegram QA] Lỗi gửi phần {i}/{total_parts}, thử lại lần {attempt + 1}...")
+                            time.sleep(1)
+                        else:
+                            print(f"[Telegram QA Error] Không thể gửi phần {i}/{total_parts} sau {max_retries + 1} lần thử: {e}")
             time.sleep(0.5)
     else:
         # Nếu cả AI đều lỗi/không trả lời được
