@@ -249,12 +249,13 @@ Rule-based: regex + keyword matching [chỉ Telegram]
 
 | Thông số | Giá trị | Vị trí |
 |---|---|---|
-| RAG score threshold | `35` | `telegram_bot.py:252`, `zalo_bot.py:316` |
-| Max conversation history | `10` tin nhắn | `telegram_bot.py:209`, `zalo_bot.py:273` |
-| Telegram split max_len | `3800` ký tự | `telegram_bot.py:820` |
-| Zalo split max_len | `1800` ký tự | `zalo_bot.py:644` |
-| Telegram retry | `2` lần | `telegram_bot.py:845` |
-| Zalo retry | `3` lần, exponential backoff | `zalo_bot.py:681` |
+| RAG score threshold | `35` | `telegram_bot.py:270`, `zalo_bot.py:334` |
+| RAG retrieval algorithm | TF-IDF unigram + **bigram boost x3** | `retrieve_chunks()` trong cả 2 bot |
+| Max conversation history | `10` tin nhắn | `telegram_bot.py:227`, `zalo_bot.py:291` |
+| Telegram split max_len | `3800` ký tự | `telegram_bot.py:838` |
+| Zalo split max_len | `1800` ký tự | `zalo_bot.py:660` |
+| Telegram retry | `2` lần | `telegram_bot.py:863` |
+| Zalo retry | `3` lần, exponential backoff | `zalo_bot.py:697` |
 | DeepSeek timeout | `25s` (Q&A), `30s` (analysis) | Các file bot |
 | Gemini temperature | `0.1` (analysis), `0.5` (Q&A) | Các file bot |
 | File cleanup interval | `3600s` (1 giờ) | `main.py:93` |

@@ -554,6 +554,9 @@ Dành cho quản trị viên (Admin) hệ thống. Người dùng thông thườ
 **H: Dự thảo bị Lãnh đạo trả lại thì phải làm sao?**
 Đ: Mở dự thảo trong mục "Văn bản ký duyệt" → đọc ý kiến trả lại của Lãnh đạo → sửa đổi nội dung theo yêu cầu → trình ký lại.
 
+**H: Kích thước ảnh chữ ký chuẩn trên hệ thống ĐHTN là bao nhiêu?**
+Đ: Kích thước ảnh chữ ký trên hệ thống ĐHTN là **480x110** pixels, sử dụng **cỡ chữ 10**.
+
 ---
 
 ### Phiếu trình
@@ -654,7 +657,7 @@ Dành cho quản trị viên (Admin) hệ thống. Người dùng thông thườ
 | **Trích yếu** | Nội dung tóm tắt ngắn gọn của văn bản |
 | **Bút phê** | Ý kiến chỉ đạo của Lãnh đạo ghi trực tiếp trên văn bản |
 | **Luân chuyển** | Quá trình chuyển văn bản qua nhiều người/đơn vị xử lý |
-| **Ký số / Chữ ký số** | Chữ ký điện tử có giá trị pháp lý tương đương chữ ký tay |
+| **Ký số / Chữ ký số** | Chữ ký điện tử có giá trị pháp lý tương đương chữ ký tay (kích thước ảnh chữ ký trên hệ thống ĐHTN là **480x110**, cỡ chữ **10**) |
 | **Dự thảo** | Bản soạn thảo ban đầu của văn bản, chưa được ký duyệt chính thức |
 | **Sổ văn bản** | Sổ ghi chép, theo dõi, đánh số thứ tự tất cả văn bản đến/đi |
 | **Xử lý chính** | Người chịu trách nhiệm chính giải quyết văn bản/công việc |

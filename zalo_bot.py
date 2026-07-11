@@ -100,11 +100,20 @@ def retrieve_chunks(question, chunks, idfs, top_n=3):
     words = [w for w in question_clean.split() if len(w) > 1]
     if not words:
         return []
+    
+    # Tạo bigram (cặp từ liên tiếp) để khớp cụm từ đặc trưng
+    # Ví dụ: "đảng phí" → "dang phi", "thủ tục" → "thu tuc"
+    bigrams = []
+    for i in range(len(words) - 1):
+        bigrams.append(words[i] + " " + words[i + 1])
+    
     scored_chunks = []
     for chunk in chunks:
         text_lower = chunk["text_unsigned"]
         source_lower = chunk["source_unsigned"]
         score = 0
+        
+        # 1. Unigram scoring (giữ nguyên logic gốc)
         for word in words:
             if word not in idfs:
                 continue
@@ -116,10 +125,23 @@ def retrieve_chunks(question, chunks, idfs, top_n=3):
             if word in source_lower:
                 word_score += 80 * idf
             score += word_score
+        
+        # 2. Bigram scoring (boost x3 cho cụm từ ghép khớp chính xác)
+        for bigram in bigrams:
+            if bigram in text_lower:
+                tf = min(text_lower.count(bigram), 3)
+                # Boost cao hơn unigram vì cụm từ chính xác hơn
+                bigram_idf = sum(idfs.get(w, 0) for w in bigram.split())
+                score += tf * bigram_idf * 3
+            if bigram in source_lower:
+                bigram_idf = sum(idfs.get(w, 0) for w in bigram.split())
+                score += 120 * bigram_idf
+        
         if score > 0:
             scored_chunks.append((score, chunk))
     scored_chunks.sort(key=lambda x: x[0], reverse=True)
     return scored_chunks[:top_n]
+
 
 def load_knowledge_bases():
     global KIENTHUC_CONTENT, CHUNKS_DATA, CHUNKS_IDFS
